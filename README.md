@@ -64,6 +64,7 @@ beads+beadhub          39      5.3        9       8318     1567.7       1.70
 | `--claude-dir` | Claude Code config dir (default: `~/.claude`) |
 | `--codex-dir` | Codex config dir (default: `~/.codex`) |
 | `--verbose` | Show detected repos, adoption dates, and skipped sessions |
+| `--history` | Show daily breakdown over time (skips empty days) |
 
 ### Path configuration (optional)
 

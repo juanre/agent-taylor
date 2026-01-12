@@ -238,3 +238,104 @@ class TestCompareArgParsing:
         ns = parser.parse_args(["compare", "--author", "Juan", "--verbose"])
 
         assert ns.verbose is True
+
+    def test_accepts_history_flag(self) -> None:
+        """compare command accepts --history flag."""
+        from agent_taylor.cli import build_parser
+
+        parser = build_parser()
+        ns = parser.parse_args(["compare", "--author", "Juan", "--history"])
+
+        assert ns.history is True
+
+
+class TestAggregateByDateAndConfiguration:
+    """Tests for aggregate_by_date_and_configuration function."""
+
+    def test_aggregates_by_date_and_config(self) -> None:
+        """aggregate_by_date_and_configuration groups by date and configuration."""
+        from agent_taylor.compare import aggregate_by_date_and_configuration
+
+        session_metrics = [
+            {"configuration": "none", "hours": 1.0, "commits": 2, "delta": 100, "date": "2025-12-01"},
+            {"configuration": "beads", "hours": 0.5, "commits": 1, "delta": 50, "date": "2025-12-01"},
+            {"configuration": "beads", "hours": 2.0, "commits": 5, "delta": 300, "date": "2025-12-03"},
+        ]
+
+        result = aggregate_by_date_and_configuration(session_metrics)
+
+        # Should be sorted by date, then by config order
+        assert len(result) == 3
+        assert result[0] == {
+            "date": "2025-12-01",
+            "configuration": "none",
+            "sessions": 1,
+            "hours": 1.0,
+            "commits": 2,
+            "delta": 100,
+            "delta_per_hour": 100.0,
+            "commits_per_hour": 2.0,
+        }
+        assert result[1] == {
+            "date": "2025-12-01",
+            "configuration": "beads",
+            "sessions": 1,
+            "hours": 0.5,
+            "commits": 1,
+            "delta": 50,
+            "delta_per_hour": 100.0,
+            "commits_per_hour": 2.0,
+        }
+        assert result[2] == {
+            "date": "2025-12-03",
+            "configuration": "beads",
+            "sessions": 1,
+            "hours": 2.0,
+            "commits": 5,
+            "delta": 300,
+            "delta_per_hour": 150.0,
+            "commits_per_hour": 2.5,
+        }
+
+    def test_combines_multiple_sessions_same_date_config(self) -> None:
+        """aggregate_by_date_and_configuration combines sessions on same date/config."""
+        from agent_taylor.compare import aggregate_by_date_and_configuration
+
+        session_metrics = [
+            {"configuration": "beads", "hours": 1.0, "commits": 2, "delta": 100, "date": "2025-12-01"},
+            {"configuration": "beads", "hours": 1.0, "commits": 3, "delta": 150, "date": "2025-12-01"},
+        ]
+
+        result = aggregate_by_date_and_configuration(session_metrics)
+
+        assert len(result) == 1
+        assert result[0]["sessions"] == 2
+        assert result[0]["hours"] == 2.0
+        assert result[0]["commits"] == 5
+        assert result[0]["delta"] == 250
+        assert result[0]["delta_per_hour"] == 125.0
+        assert result[0]["commits_per_hour"] == 2.5
+
+    def test_skips_days_with_no_sessions(self) -> None:
+        """aggregate_by_date_and_configuration doesn't include empty days."""
+        from agent_taylor.compare import aggregate_by_date_and_configuration
+
+        session_metrics = [
+            {"configuration": "beads", "hours": 1.0, "commits": 2, "delta": 100, "date": "2025-12-01"},
+            {"configuration": "beads", "hours": 1.0, "commits": 2, "delta": 100, "date": "2025-12-05"},
+        ]
+
+        result = aggregate_by_date_and_configuration(session_metrics)
+
+        # Only 2 entries, no entries for 12-02, 12-03, 12-04
+        assert len(result) == 2
+        dates = [r["date"] for r in result]
+        assert dates == ["2025-12-01", "2025-12-05"]
+
+    def test_returns_empty_list_for_no_sessions(self) -> None:
+        """aggregate_by_date_and_configuration returns empty list for no sessions."""
+        from agent_taylor.compare import aggregate_by_date_and_configuration
+
+        result = aggregate_by_date_and_configuration([])
+
+        assert result == []

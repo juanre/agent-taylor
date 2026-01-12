@@ -20,6 +20,7 @@ from .beads_metrics import gather_beads_metrics, human_bytes, write_beads_csv
 from .compare import (
     SessionMetrics,
     aggregate_by_configuration,
+    aggregate_by_date_and_configuration,
     classify_session,
     get_commits_in_window,
 )
@@ -187,6 +188,7 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             hours=hours,
             commits=len(commits),
             delta=total_delta,
+            date=session_date,
         ))
 
     if ns.verbose and (skipped_no_repo > 0 or skipped_before_start > 0):
@@ -197,21 +199,33 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         print("No sessions matched the criteria.", file=sys.stderr)
         return 1
 
-    # Aggregate by configuration
-    aggregated = aggregate_by_configuration(session_metrics)
-
     # Print results
     print()
-    print(f"{'configuration':<16} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
-    print("-" * 82)
-    for config_name in ["none", "beads", "beads+beadhub"]:
-        cfg = aggregated[config_name]
-        if cfg["hours"] > 0 or cfg["sessions"] > 0:
+
+    if ns.history:
+        # Daily breakdown
+        daily = aggregate_by_date_and_configuration(session_metrics)
+        print(f"{'date':<12} {'configuration':<16} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
+        print("-" * 102)
+        for day in daily:
             print(
-                f"{config_name:<16} {cfg['sessions']:>8} {cfg['hours']:>8.1f} "
-                f"{cfg['commits']:>8} {cfg['delta']:>10} "
-                f"{cfg['delta_per_hour']:>10.1f} {cfg['commits_per_hour']:>10.2f}"
+                f"{day['date']:<12} {day['configuration']:<16} {day['sessions']:>8} {day['hours']:>8.1f} "
+                f"{day['commits']:>8} {day['delta']:>10} "
+                f"{day['delta_per_hour']:>10.1f} {day['commits_per_hour']:>10.2f}"
             )
+    else:
+        # Aggregate by configuration
+        aggregated = aggregate_by_configuration(session_metrics)
+        print(f"{'configuration':<16} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
+        print("-" * 82)
+        for config_name in ["none", "beads", "beads+beadhub"]:
+            cfg = aggregated[config_name]
+            if cfg["hours"] > 0 or cfg["sessions"] > 0:
+                print(
+                    f"{config_name:<16} {cfg['sessions']:>8} {cfg['hours']:>8.1f} "
+                    f"{cfg['commits']:>8} {cfg['delta']:>10} "
+                    f"{cfg['delta_per_hour']:>10.1f} {cfg['commits_per_hour']:>10.2f}"
+                )
 
     return 0
 
@@ -259,6 +273,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Show detailed output.",
+    )
+    compare.add_argument(
+        "--history",
+        action="store_true",
+        help="Show daily breakdown over time.",
     )
     compare.set_defaults(func=_cmd_compare)
 

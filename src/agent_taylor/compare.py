@@ -28,11 +28,25 @@ class SessionMetrics(TypedDict):
     hours: float
     commits: int
     delta: int
+    date: str
 
 
 class AggregatedMetrics(TypedDict):
     """Aggregated metrics for a configuration."""
 
+    sessions: int
+    hours: float
+    commits: int
+    delta: int
+    delta_per_hour: float
+    commits_per_hour: float
+
+
+class DailyMetrics(TypedDict):
+    """Aggregated metrics for a single date and configuration."""
+
+    date: str
+    configuration: str
     sessions: int
     hours: float
     commits: int
@@ -211,3 +225,54 @@ def aggregate_by_configuration(
             result[config]["commits_per_hour"] = result[config]["commits"] / hours
 
     return result
+
+
+def aggregate_by_date_and_configuration(
+    session_metrics: list[SessionMetrics],
+) -> list[DailyMetrics]:
+    """Aggregate session metrics by date and configuration.
+
+    Args:
+        session_metrics: List of SessionMetrics dicts with date field.
+
+    Returns:
+        List of DailyMetrics dicts sorted by date, then by config order.
+        Only includes (date, config) pairs that have sessions.
+    """
+    if not session_metrics:
+        return []
+
+    # Group by (date, configuration)
+    groups: dict[tuple[str, str], DailyMetrics] = {}
+    config_order = ["none", "beads", "beads+beadhub"]
+
+    for session in session_metrics:
+        key = (session["date"], session["configuration"])
+        if key not in groups:
+            groups[key] = DailyMetrics(
+                date=session["date"],
+                configuration=session["configuration"],
+                sessions=0,
+                hours=0.0,
+                commits=0,
+                delta=0,
+                delta_per_hour=0.0,
+                commits_per_hour=0.0,
+            )
+        groups[key]["sessions"] += 1
+        groups[key]["hours"] += session["hours"]
+        groups[key]["commits"] += session["commits"]
+        groups[key]["delta"] += session["delta"]
+
+    # Compute rates
+    for group in groups.values():
+        if group["hours"] > 0:
+            group["delta_per_hour"] = group["delta"] / group["hours"]
+            group["commits_per_hour"] = group["commits"] / group["hours"]
+
+    # Sort by date, then by config order
+    def sort_key(item: DailyMetrics) -> tuple[str, int]:
+        config_idx = config_order.index(item["configuration"]) if item["configuration"] in config_order else 99
+        return (item["date"], config_idx)
+
+    return sorted(groups.values(), key=sort_key)
