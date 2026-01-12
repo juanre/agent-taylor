@@ -52,6 +52,15 @@ from .repo_detection import (
     collect_repos_from_interactions,
     load_path_config,
 )
+from .config_detection import (
+    detect_beads_date,
+    is_beadhub_repo,
+)
+from .compare import (
+    aggregate_by_configuration,
+    classify_session,
+    get_commits_in_window,
+)
 
 
 def _version() -> str:
@@ -468,6 +477,143 @@ def _cmd_productivity(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compare(ns: argparse.Namespace) -> int:
+    """Compare productivity across beads/beadhub configurations."""
+    from datetime import datetime
+
+    # Load path config
+    config_path = Path(ns.config).expanduser() if ns.config else None
+    config = load_path_config(config_path)
+
+    # Collect AI interactions
+    claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
+    codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
+    interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
+
+    if not interactions:
+        print("No interactions found in AI assistant logs.", file=sys.stderr)
+        return 1
+
+    # Detect source date ranges
+    source_dates = detect_source_date_ranges(claude_dir=claude_dir, codex_dir=codex_dir)
+    auto_since = effective_start_date(source_dates)
+
+    if ns.verbose:
+        if source_dates["claude"]:
+            print(f"claude_logs_start: {source_dates['claude']}")
+        if source_dates["codex"]:
+            print(f"codex_logs_start: {source_dates['codex']}")
+        if auto_since:
+            print(f"effective_start_date: {auto_since}")
+
+    # Detect repos from interactions
+    repos = collect_repos_from_interactions(interactions, config)
+
+    if not repos:
+        print("No git repositories detected from AI logs.", file=sys.stderr)
+        return 1
+
+    if ns.verbose:
+        print(f"repos_detected: {len(repos)}")
+        for repo_root in sorted(repos.keys()):
+            repo_name = Path(repo_root).name
+            print(f"  - {repo_name} ({repo_root})")
+
+    # Get beads adoption date and beadhub status for each repo
+    repo_configs: dict[str, dict[str, object]] = {}
+    for repo_root in repos:
+        repo_path = Path(repo_root)
+        beads_date = detect_beads_date(repo_path)
+        is_beadhub = is_beadhub_repo(repo_path)
+        repo_configs[repo_root] = {
+            "beads_date": beads_date,
+            "is_beadhub": is_beadhub,
+        }
+        if ns.verbose and (beads_date or is_beadhub):
+            repo_name = repo_path.name
+            info = []
+            if beads_date:
+                info.append(f"beads: {beads_date}")
+            if is_beadhub:
+                info.append("beadhub repo")
+            print(f"  {repo_name}: {', '.join(info)}")
+
+    # Detect sessions from interactions
+    sessions = detect_sessions(interactions)
+
+    if not sessions:
+        print("No sessions detected.", file=sys.stderr)
+        return 1
+
+    # Build repo name -> repo root mapping
+    repo_by_name: dict[str, str] = {}
+    for repo_root in repos:
+        repo_name = Path(repo_root).name
+        repo_by_name[repo_name] = repo_root
+
+    # Process each session
+    session_metrics: list[dict[str, object]] = []
+    for session in sessions:
+        # Find the repo root for this session's project
+        repo_root = repo_by_name.get(session.project)
+        if repo_root is None:
+            continue
+
+        # Get configuration for this session
+        repo_config = repo_configs.get(repo_root, {})
+        session_date = datetime.fromtimestamp(session.start_ts).strftime("%Y-%m-%d")
+
+        # Skip sessions before effective start date
+        if auto_since and session_date < auto_since:
+            continue
+
+        configuration = classify_session(
+            session_start_date=session_date,
+            beads_date=repo_config.get("beads_date"),
+            is_beadhub=bool(repo_config.get("is_beadhub")),
+        )
+
+        # Get commits during this session
+        commits = get_commits_in_window(
+            repo=Path(repo_root),
+            start_ts=session.start_ts,
+            end_ts=session.end_ts,
+            author=ns.author,
+        )
+
+        total_delta = sum(int(c.get("delta", 0)) for c in commits)
+        hours = session.estimated_seconds / 3600
+
+        session_metrics.append({
+            "configuration": configuration,
+            "hours": hours,
+            "commits": len(commits),
+            "delta": total_delta,
+        })
+
+    if not session_metrics:
+        print("No sessions matched the criteria.", file=sys.stderr)
+        return 1
+
+    # Aggregate by configuration
+    aggregated = aggregate_by_configuration(session_metrics)
+
+    # Print results
+    print()
+    print(f"{'configuration':<16} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
+    print("-" * 82)
+    for config_name in ["none", "beads", "beads+beadhub"]:
+        cfg = aggregated[config_name]
+        if cfg["hours"] > 0 or cfg["sessions"] > 0:
+            print(
+                f"{config_name:<16} {int(cfg['sessions']):>8} {cfg['hours']:>8.1f} "
+                f"{int(cfg['commits']):>8} {int(cfg['delta']):>10} "
+                f"{cfg['delta_per_hour']:>10.1f} {cfg['commits_per_hour']:>10.2f}"
+            )
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-taylor", description="Git history analysis utilities."
@@ -742,6 +888,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show which repos were detected.",
     )
     productivity.set_defaults(func=_cmd_productivity)
+
+    compare = sub.add_parser(
+        "compare",
+        help="Compare productivity across beads/beadhub configurations.",
+    )
+    compare.add_argument(
+        "--author",
+        required=True,
+        help="Filter commits by author regex (required).",
+    )
+    compare.add_argument(
+        "--config",
+        default=None,
+        help="Path config file for remapping/ignoring paths.",
+    )
+    compare.add_argument(
+        "--claude-dir",
+        default=None,
+        help="Path to Claude Code config dir (default: ~/.claude).",
+    )
+    compare.add_argument(
+        "--codex-dir",
+        default=None,
+        help="Path to Codex config dir (default: ~/.codex).",
+    )
+    compare.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed output.",
+    )
+    compare.set_defaults(func=_cmd_compare)
 
     return parser
 
