@@ -46,6 +46,10 @@ from .plotting import (
     plot_delta_progression_png,
     plot_rates_png,
 )
+from .repo_detection import (
+    collect_repos_from_interactions,
+    load_path_config,
+)
 
 
 def _version() -> str:
@@ -320,6 +324,133 @@ def _cmd_combine(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_productivity(ns: argparse.Namespace) -> int:
+    """Unified productivity analysis: auto-detect repos and compute metrics."""
+    output_dir = Path(ns.output_dir).expanduser()
+
+    # Load path config
+    config_path = Path(ns.config).expanduser() if ns.config else None
+    config = load_path_config(config_path)
+
+    # Collect AI interactions
+    claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
+    codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
+    interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
+
+    if not interactions:
+        print("No interactions found in AI assistant logs.", file=sys.stderr)
+        return 1
+
+    # Detect repos from interactions
+    repos = collect_repos_from_interactions(interactions, config)
+
+    if not repos:
+        print("No git repositories detected from AI logs.", file=sys.stderr)
+        return 1
+
+    if ns.verbose:
+        print(f"repos_detected: {len(repos)}")
+        for repo_root in sorted(repos.keys()):
+            repo_name = Path(repo_root).name
+            print(f"  - {repo_name} ({repo_root})")
+
+    # Analyze each repo
+    options = AnalyzeOptions(
+        by=ns.by,
+        include_merges=False,
+        author=ns.author,
+        since=ns.since,
+        until=ns.until,
+        outlier_method=ns.outlier_method,
+        outlier_z=ns.outlier_z,
+    )
+
+    all_git_daily: dict[str, dict[str, object]] = {}
+    for repo_root in repos:
+        repo_path = Path(repo_root)
+        try:
+            commits = collect_commit_metrics(repo_path, options)
+            if commits:
+                daily = daily_rows(commits)
+                # Aggregate into combined dict
+                for row in daily:
+                    day = str(row.get("day", ""))
+                    if not day:
+                        continue
+                    if day not in all_git_daily:
+                        all_git_daily[day] = {
+                            "day": day,
+                            "commits": 0,
+                            "delta": 0,
+                            "delta_ex_outliers": 0,
+                        }
+                    all_git_daily[day]["commits"] = int(all_git_daily[day]["commits"]) + int(
+                        str(row.get("commits", 0))
+                    )
+                    all_git_daily[day]["delta"] = int(all_git_daily[day]["delta"]) + int(
+                        str(row.get("delta", 0))
+                    )
+                    all_git_daily[day]["delta_ex_outliers"] = int(
+                        all_git_daily[day]["delta_ex_outliers"]
+                    ) + int(str(row.get("delta_ex_outliers", row.get("delta", 0))))
+        except RuntimeError:
+            if ns.verbose:
+                print(f"  (skipped: {repo_root})")
+            continue
+
+    # Detect sessions from interactions
+    sessions = detect_sessions(interactions)
+    daily_project = aggregate_daily_project_hours(sessions)
+
+    # Aggregate AI hours by day (across all projects in detected repos)
+    repo_names = {Path(r).name for r in repos}
+    ai_hours_by_day: dict[str, float] = {}
+    for h in daily_project:
+        if h.project in repo_names:
+            ai_hours_by_day[h.day] = ai_hours_by_day.get(h.day, 0.0) + h.session_hours
+
+    if not ai_hours_by_day:
+        print("No AI hours found for detected repos.", file=sys.stderr)
+        return 1
+
+    # Ensure all days with AI hours are in git_daily (even with zero commits)
+    # This counts days where you worked but didn't commit toward the denominator
+    for day in ai_hours_by_day:
+        if day not in all_git_daily:
+            all_git_daily[day] = {
+                "day": day,
+                "commits": 0,
+                "delta": 0,
+                "delta_ex_outliers": 0,
+            }
+
+    # Combine metrics
+    combined = combine_metrics(
+        git_daily=all_git_daily,
+        ai_hours=ai_hours_by_day,
+        since=ns.since,
+        until=ns.until,
+    )
+
+    if not combined:
+        print("No data in specified date range.", file=sys.stderr)
+        return 1
+
+    summary = compute_summary(combined)
+    if summary is None:
+        print("Could not compute summary.", file=sys.stderr)
+        return 1
+
+    # Write output
+    output_dir.mkdir(parents=True, exist_ok=True)
+    combined_csv = output_dir / "productivity.csv"
+    write_combined_csv(combined_csv, combined)
+
+    print_combined_summary(summary)
+    print(f"csv: {combined_csv}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-taylor", description="Git history analysis utilities."
@@ -530,6 +661,70 @@ def build_parser() -> argparse.ArgumentParser:
         help="Robust z-score threshold.",
     )
     batch.set_defaults(func=_cmd_batch_analyze)
+
+    productivity = sub.add_parser(
+        "productivity",
+        help="Unified productivity analysis: auto-detect repos from AI logs and compute metrics.",
+    )
+    productivity.add_argument(
+        "--author",
+        required=True,
+        help="Filter commits by author regex (required to avoid mixing authors).",
+    )
+    productivity.add_argument(
+        "--since",
+        default=None,
+        help="Only include data on or after this date (YYYY-MM-DD).",
+    )
+    productivity.add_argument(
+        "--until",
+        default=None,
+        help="Only include data on or before this date (YYYY-MM-DD).",
+    )
+    productivity.add_argument(
+        "--output-dir",
+        default="out/productivity",
+        help="Directory to write outputs (default: out/productivity).",
+    )
+    productivity.add_argument(
+        "--config",
+        default=None,
+        help="Path config file for remapping/ignoring paths (default: ~/.config/agent-taylor/paths.toml).",
+    )
+    productivity.add_argument(
+        "--claude-dir",
+        default=None,
+        help="Path to Claude Code config dir (default: ~/.claude).",
+    )
+    productivity.add_argument(
+        "--codex-dir",
+        default=None,
+        help="Path to Codex config dir (default: ~/.codex).",
+    )
+    productivity.add_argument(
+        "--by",
+        choices=["committer", "author"],
+        default="committer",
+        help="Which date to group by (default: committer).",
+    )
+    productivity.add_argument(
+        "--outlier-method",
+        choices=["none", "mad-log-delta"],
+        default="mad-log-delta",
+        help="How to flag outlier commits (default: mad-log-delta).",
+    )
+    productivity.add_argument(
+        "--outlier-z",
+        type=float,
+        default=3.5,
+        help="Robust z-score threshold (default: 3.5).",
+    )
+    productivity.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show which repos were detected.",
+    )
+    productivity.set_defaults(func=_cmd_productivity)
 
     return parser
 

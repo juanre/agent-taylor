@@ -154,7 +154,7 @@ def _parse_claude_sessions(claude_dir: Path) -> list[Interaction]:
                         cwd = msg.get("cwd", "")
                         if not cwd:
                             # Try to infer from project dir name
-                            # Format: -Users-juanre-prj-foo -> /Users/juanre/prj/foo
+                            # Format: -Users-name-projects-repo -> /Users/name/projects/repo
                             cwd = project_dir.name.replace("-", "/")
                             if not cwd.startswith("/"):
                                 cwd = "/" + cwd

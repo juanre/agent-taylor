@@ -207,6 +207,68 @@ Git-based vs AI-based productivity measurement for the same period:
 The git commit-timestamp method overcounted hours by 3.1x, making productivity appear 3x lower
 than actual.
 
+#### Unified productivity analysis (recommended)
+
+The `productivity` command automatically detects git repos from your AI assistant logs and combines
+everything in one step. This is the recommended way to measure productivity.
+
+```bash
+uv run agent-taylor productivity \
+  --author "Your Name" \
+  --since 2025-12-01 \
+  --output-dir out/productivity \
+  --verbose
+```
+
+**How it works:**
+
+1. Parses AI logs from Claude Code (`~/.claude/`) and Codex (`~/.codex/`)
+2. Extracts working directory paths from each conversation
+3. Detects git repos from those paths (runs `git rev-parse --show-toplevel`)
+4. Analyzes each discovered repo for commits matching your author filter
+5. Combines git metrics with AI session hours
+6. Outputs unified productivity CSV
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--author` | **Required.** Filter commits by author regex |
+| `--since` | Start date (YYYY-MM-DD) |
+| `--until` | End date (YYYY-MM-DD) |
+| `--output-dir` | Output directory (default: `out/productivity`) |
+| `--config` | Path config for remapping/ignoring paths |
+| `--verbose` | Show which repos were detected |
+| `--outlier-method` | Outlier detection method (default: `mad-log-delta`) |
+
+**Output:**
+
+```
+repos_detected: 3
+  - beadhub (/Users/name/prj/beadhub)
+  - llmring (/Users/name/prj/llmring)
+  - pgdbm (/Users/name/prj/pgdbm)
+date_range: 2025-12-01..2026-01-12
+days_analyzed: 28
+total_commits: 342
+total_ai_hours: 96.7
+delta_per_ai_hour: 924.8
+csv: out/productivity/productivity.csv
+```
+
+##### Path configuration (optional)
+
+If you've moved repos or want to ignore certain paths, create a config file at
+`~/.config/agent-taylor/paths.toml`:
+
+```toml
+[remap]
+"/old/path/to/repo" = "/new/path/to/repo"
+
+[ignore]
+paths = ["/tmp", "/Users/name/Downloads"]
+```
+
 #### Beads usage (optional)
 
 Reports the size of `.beads/beads.db` and counts beads via `.beads/issues.jsonl` line count.
