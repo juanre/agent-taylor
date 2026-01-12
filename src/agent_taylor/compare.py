@@ -6,9 +6,39 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 from .config_detection import get_configuration
+
+
+class CommitInfo(TypedDict):
+    """Commit information from git log."""
+
+    sha: str
+    timestamp: int
+    added: int
+    deleted: int
+    delta: int
+
+
+class SessionMetrics(TypedDict):
+    """Metrics for a single session."""
+
+    configuration: str
+    hours: float
+    commits: int
+    delta: int
+
+
+class AggregatedMetrics(TypedDict):
+    """Aggregated metrics for a configuration."""
+
+    sessions: int
+    hours: float
+    commits: int
+    delta: int
+    delta_per_hour: float
+    commits_per_hour: float
 
 
 def get_commits_in_window(
@@ -16,7 +46,7 @@ def get_commits_in_window(
     start_ts: float,
     end_ts: float,
     author: Optional[str] = None,
-) -> list[dict[str, object]]:
+) -> list[CommitInfo]:
     """Get commits in a repository within a time window.
 
     Args:
@@ -26,7 +56,7 @@ def get_commits_in_window(
         author: Optional author regex to filter commits.
 
     Returns:
-        List of commit dicts with 'sha', 'timestamp', 'delta' keys.
+        List of CommitInfo dicts with sha, timestamp, delta keys.
     """
     if not repo.exists():
         return []
@@ -65,10 +95,10 @@ def get_commits_in_window(
         return []
 
 
-def _parse_git_log_numstat(output: str) -> list[dict[str, object]]:
+def _parse_git_log_numstat(output: str) -> list[CommitInfo]:
     """Parse git log --numstat output into commit dicts."""
-    commits: list[dict[str, object]] = []
-    current_commit: Optional[dict[str, object]] = None
+    commits: list[CommitInfo] = []
+    current_commit: Optional[CommitInfo] = None
 
     for line in output.strip().split("\n"):
         if not line:
@@ -80,13 +110,13 @@ def _parse_git_log_numstat(output: str) -> list[dict[str, object]]:
                 commits.append(current_commit)
             parts = line.split("|")
             if len(parts) == 2:
-                current_commit = {
-                    "sha": parts[0],
-                    "timestamp": int(parts[1]),
-                    "added": 0,
-                    "deleted": 0,
-                    "delta": 0,
-                }
+                current_commit = CommitInfo(
+                    sha=parts[0],
+                    timestamp=int(parts[1]),
+                    added=0,
+                    deleted=0,
+                    delta=0,
+                )
         elif current_commit is not None:
             # Numstat line: added\tdeleted\tfilename
             parts = line.split("\t")
@@ -94,9 +124,9 @@ def _parse_git_log_numstat(output: str) -> list[dict[str, object]]:
                 try:
                     added = int(parts[0]) if parts[0] != "-" else 0
                     deleted = int(parts[1]) if parts[1] != "-" else 0
-                    current_commit["added"] = int(current_commit["added"]) + added
-                    current_commit["deleted"] = int(current_commit["deleted"]) + deleted
-                    current_commit["delta"] = int(current_commit["delta"]) + added + deleted
+                    current_commit["added"] += added
+                    current_commit["deleted"] += deleted
+                    current_commit["delta"] += added + deleted
                 except ValueError:
                     pass
 
@@ -125,54 +155,53 @@ def classify_session(
 
 
 def aggregate_by_configuration(
-    session_metrics: list[dict[str, object]],
-) -> dict[str, dict[str, float]]:
+    session_metrics: list[SessionMetrics],
+) -> dict[str, AggregatedMetrics]:
     """Aggregate session metrics by configuration.
 
     Args:
-        session_metrics: List of dicts with 'configuration', 'hours',
-                        'commits', 'delta' keys.
+        session_metrics: List of SessionMetrics dicts.
 
     Returns:
         Dict mapping configuration to aggregated metrics including rates.
     """
     # Initialize all configurations
-    result: dict[str, dict[str, float]] = {
-        "none": {
-            "sessions": 0,
-            "hours": 0.0,
-            "commits": 0,
-            "delta": 0,
-            "delta_per_hour": 0.0,
-            "commits_per_hour": 0.0,
-        },
-        "beads": {
-            "sessions": 0,
-            "hours": 0.0,
-            "commits": 0,
-            "delta": 0,
-            "delta_per_hour": 0.0,
-            "commits_per_hour": 0.0,
-        },
-        "beads+beadhub": {
-            "sessions": 0,
-            "hours": 0.0,
-            "commits": 0,
-            "delta": 0,
-            "delta_per_hour": 0.0,
-            "commits_per_hour": 0.0,
-        },
+    result: dict[str, AggregatedMetrics] = {
+        "none": AggregatedMetrics(
+            sessions=0,
+            hours=0.0,
+            commits=0,
+            delta=0,
+            delta_per_hour=0.0,
+            commits_per_hour=0.0,
+        ),
+        "beads": AggregatedMetrics(
+            sessions=0,
+            hours=0.0,
+            commits=0,
+            delta=0,
+            delta_per_hour=0.0,
+            commits_per_hour=0.0,
+        ),
+        "beads+beadhub": AggregatedMetrics(
+            sessions=0,
+            hours=0.0,
+            commits=0,
+            delta=0,
+            delta_per_hour=0.0,
+            commits_per_hour=0.0,
+        ),
     }
 
     # Aggregate metrics
     for session in session_metrics:
-        config = str(session.get("configuration", "none"))
+        config = session["configuration"]
         if config not in result:
             continue
         result[config]["sessions"] += 1
-        result[config]["hours"] += float(session.get("hours", 0))
-        result[config]["commits"] += int(session.get("commits", 0))
-        result[config]["delta"] += int(session.get("delta", 0))
+        result[config]["hours"] += session["hours"]
+        result[config]["commits"] += session["commits"]
+        result[config]["delta"] += session["delta"]
 
     # Compute rates
     for config in result:

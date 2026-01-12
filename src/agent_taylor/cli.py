@@ -1,66 +1,43 @@
+# ABOUTME: CLI entry point for agent-taylor productivity analysis tool.
+# ABOUTME: Provides compare command for beads/beadhub configuration comparison.
+
 from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from importlib import metadata
 from pathlib import Path
+from typing import Optional, TypedDict
 
 from .ai_hours import (
-    aggregate_daily_project_hours,
-    aggregate_daily_sitting_hours,
     collect_interactions,
     detect_sessions,
-    detect_sittings,
     detect_source_date_ranges,
     effective_start_date,
-    print_summary as print_ai_hours_summary,
-    write_sessions_csv,
-    write_sittings_csv,
 )
 from .beads_metrics import gather_beads_metrics, human_bytes, write_beads_csv
-from .batch import (
-    aggregate_daily_metrics,
-    analyze_repos,
-    print_batch_summary,
-    write_aggregated_csv,
-)
-from .combined import (
-    aggregate_git_dailies,
-    combine_metrics,
-    compute_summary,
-    load_ai_sessions,
-    load_ai_sittings,
-    load_git_daily,
-    print_combined_summary,
-    write_combined_csv,
-)
-from .git_metrics import (
-    AnalyzeOptions,
-    collect_commit_metrics,
-    commit_rows,
-    daily_rows,
-    print_summary,
-    write_csv,
-)
-from .plotting import (
-    load_progression_from_daily_csv,
-    load_rates_from_daily_csv,
-    plot_delta_progression_png,
-    plot_rates_png,
-)
-from .repo_detection import (
-    collect_repos_from_interactions,
-    load_path_config,
+from .compare import (
+    SessionMetrics,
+    aggregate_by_configuration,
+    classify_session,
+    get_commits_in_window,
 )
 from .config_detection import (
     detect_beads_date,
     is_beadhub_repo,
 )
-from .compare import (
-    aggregate_by_configuration,
-    classify_session,
-    get_commits_in_window,
+from .repo_detection import (
+    collect_repos_from_interactions,
+    load_path_config,
 )
+
+
+class RepoConfig(TypedDict):
+    """Configuration state for a repository."""
+
+    beads_date: Optional[str]
+    is_beadhub: bool
 
 
 def _version() -> str:
@@ -68,125 +45,6 @@ def _version() -> str:
         return metadata.version("agent-taylor")
     except metadata.PackageNotFoundError:
         return "0.0.0"
-
-
-def _cmd_analyze(ns: argparse.Namespace) -> int:
-    options = AnalyzeOptions(
-        by=ns.by,
-        include_merges=ns.include_merges,
-        author=ns.author,
-        since=ns.since,
-        until=ns.until,
-        outlier_method=ns.outlier_method,
-        outlier_z=ns.outlier_z,
-    )
-    repo = Path(ns.repo)
-    output_dir = Path(ns.output_dir).expanduser()
-    commits = collect_commit_metrics(repo, options)
-    daily = daily_rows(commits)
-
-    commit_csv = output_dir / "commit_metrics.csv"
-    daily_csv = output_dir / "daily_metrics.csv"
-
-    write_csv(
-        commit_csv,
-        commit_rows(commits),
-        [
-            "day",
-            "commit",
-            "timestamp",
-            "files",
-            "binary_files",
-            "added",
-            "deleted",
-            "delta",
-            "is_outlier",
-            "robust_z",
-        ],
-    )
-    write_csv(
-        daily_csv,
-        daily,
-        [
-            "day",
-            "commits",
-            "first_ts",
-            "last_ts",
-            "span_hours",
-            "avg_seconds_between_commits",
-            "prep_seconds",
-            "estimated_hours",
-            "estimated_hours_strict",
-            "files",
-            "binary_files",
-            "added",
-            "deleted",
-            "delta",
-            "outlier_commits",
-            "delta_ex_outliers",
-            "commits_per_span_hour",
-            "delta_per_span_hour",
-            "commits_per_estimated_hour",
-            "delta_per_estimated_hour",
-            "delta_per_estimated_hour_ex_outliers",
-            "commits_per_estimated_hour_strict",
-            "delta_per_estimated_hour_strict",
-            "delta_per_estimated_hour_strict_ex_outliers",
-            "avg_delta_per_commit",
-            "median_delta_per_commit",
-            "p90_delta_per_commit",
-            "max_delta_per_commit",
-        ],
-    )
-
-    print_summary(repo.expanduser().resolve(), options, commits, daily)
-    print(f"csv_daily: {daily_csv}")
-    print(f"csv_commit: {commit_csv}")
-    return 0
-
-
-def _cmd_plot_rates(ns: argparse.Namespace) -> int:
-    daily_csv = Path(ns.daily_csv).expanduser().resolve()
-    output_png = (
-        Path(ns.output_png).expanduser()
-        if ns.output_png
-        else daily_csv.parent / "rates_over_time.png"
-    )
-    rates = load_rates_from_daily_csv(daily_csv, hours=ns.hours)
-    title = ns.title or f"rates over time ({ns.hours} hours)"
-    plot_rates_png(
-        rates=rates,
-        output_png=output_png,
-        title=title,
-        rolling_window=ns.rolling_window,
-        dpi=ns.dpi,
-    )
-    print(f"wrote: {output_png}")
-    return 0
-
-
-def _cmd_plot_progression(ns: argparse.Namespace) -> int:
-    daily_csv = Path(ns.daily_csv).expanduser().resolve()
-    output_png = (
-        Path(ns.output_png).expanduser()
-        if ns.output_png
-        else daily_csv.parent / "delta_progression.png"
-    )
-    series = load_progression_from_daily_csv(
-        daily_csv=daily_csv,
-        hours=ns.hours,
-        window_hours=ns.window_hours,
-    )
-    title = ns.title or f"delta/hour progression ({ns.hours} hours, {ns.window_hours}h window)"
-    plot_delta_progression_png(
-        series=series,
-        output_png=output_png,
-        title=title,
-        dpi=ns.dpi,
-        log_y=ns.log_y,
-    )
-    print(f"wrote: {output_png}")
-    return 0
 
 
 def _cmd_beads(ns: argparse.Namespace) -> int:
@@ -210,277 +68,8 @@ def _cmd_beads(ns: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_ai_hours(ns: argparse.Namespace) -> int:
-    claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
-    codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
-    output_dir = Path(ns.output_dir).expanduser()
-
-    interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
-    if not interactions:
-        print("No interactions found in AI assistant logs.", file=sys.stderr)
-        return 1
-
-    sessions = detect_sessions(interactions, project_filter=ns.project)
-    sittings = detect_sittings(interactions)
-
-    daily_project = aggregate_daily_project_hours(sessions)
-    daily_sitting = aggregate_daily_sitting_hours(sittings)
-
-    # Filter sittings to date range of sessions if project filter is set
-    if ns.project and daily_project:
-        days = set(h.day for h in daily_project)
-        daily_sitting = [h for h in daily_sitting if h.day in days]
-
-    sessions_csv = output_dir / "ai_sessions.csv"
-    sittings_csv = output_dir / "ai_sittings.csv"
-
-    write_sessions_csv(sessions_csv, daily_project)
-    write_sittings_csv(sittings_csv, daily_sitting)
-
-    print_ai_hours_summary(daily_project, daily_sitting, project_filter=ns.project)
-    print(f"csv_sessions: {sessions_csv}")
-    print(f"csv_sittings: {sittings_csv}")
-    return 0
-
-
-def _cmd_batch_analyze(ns: argparse.Namespace) -> int:
-    repos = [Path(r).expanduser().resolve() for r in ns.repos]
-    output_dir = Path(ns.output_dir).expanduser()
-
-    options = AnalyzeOptions(
-        by=ns.by,
-        include_merges=ns.include_merges,
-        author=ns.author,
-        since=ns.since,
-        until=ns.until,
-        outlier_method=ns.outlier_method,
-        outlier_z=ns.outlier_z,
-    )
-
-    all_daily = analyze_repos(repos, options)
-    if not all_daily:
-        print("No commits found in any repo", file=sys.stderr)
-        return 1
-
-    aggregated = aggregate_daily_metrics(all_daily)
-
-    # Filter by date range for output
-    if ns.since:
-        aggregated = [r for r in aggregated if str(r["day"]) >= ns.since]
-    if ns.until:
-        aggregated = [r for r in aggregated if str(r["day"]) <= ns.until]
-
-    output_csv = output_dir / "aggregated_daily.csv"
-    write_aggregated_csv(output_csv, aggregated)
-
-    print_batch_summary(all_daily, aggregated, since=ns.since, until=ns.until)
-    print(f"csv: {output_csv}")
-    return 0
-
-
-def _cmd_combine(ns: argparse.Namespace) -> int:
-    output_dir = Path(ns.output_dir).expanduser()
-
-    # Load git daily metrics (single file or multiple)
-    git_daily_paths = [Path(p).expanduser().resolve() for p in ns.git_daily]
-    if len(git_daily_paths) == 1:
-        git_daily = load_git_daily(git_daily_paths[0])
-    else:
-        git_daily = aggregate_git_dailies(git_daily_paths)
-
-    # Load AI hours (sessions or sittings)
-    if ns.ai_sessions:
-        ai_hours = load_ai_sessions(Path(ns.ai_sessions), project=ns.project)
-        hours_type = "session"
-    elif ns.ai_sittings:
-        ai_hours = load_ai_sittings(Path(ns.ai_sittings))
-        hours_type = "sitting"
-    else:
-        print("Must specify --ai-sessions or --ai-sittings", file=sys.stderr)
-        return 1
-
-    if not git_daily:
-        print("No git daily metrics found", file=sys.stderr)
-        return 1
-    if not ai_hours:
-        print("No AI hours found", file=sys.stderr)
-        return 1
-
-    # Combine and filter by date range
-    combined = combine_metrics(
-        git_daily=git_daily,
-        ai_hours=ai_hours,
-        since=ns.since,
-        until=ns.until,
-    )
-
-    if not combined:
-        print("No overlapping days between git and AI data", file=sys.stderr)
-        return 1
-
-    summary = compute_summary(combined)
-    if summary is None:
-        print("Could not compute summary", file=sys.stderr)
-        return 1
-
-    # Write output
-    combined_csv = output_dir / f"combined_{hours_type}.csv"
-    write_combined_csv(combined_csv, combined)
-
-    print(f"hours_type: {hours_type}")
-    if ns.project:
-        print(f"project_filter: {ns.project}")
-    print_combined_summary(summary)
-    print(f"csv: {combined_csv}")
-    return 0
-
-
-def _cmd_productivity(ns: argparse.Namespace) -> int:
-    """Unified productivity analysis: auto-detect repos and compute metrics."""
-    output_dir = Path(ns.output_dir).expanduser()
-
-    # Load path config
-    config_path = Path(ns.config).expanduser() if ns.config else None
-    config = load_path_config(config_path)
-
-    # Collect AI interactions
-    claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
-    codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
-    interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
-
-    if not interactions:
-        print("No interactions found in AI assistant logs.", file=sys.stderr)
-        return 1
-
-    # Detect source date ranges and compute effective start date
-    source_dates = detect_source_date_ranges(claude_dir=claude_dir, codex_dir=codex_dir)
-    auto_since = effective_start_date(source_dates)
-
-    # Use auto-detected start date if --since not provided
-    since = ns.since if ns.since else auto_since
-
-    if ns.verbose:
-        if source_dates["claude"]:
-            print(f"claude_logs_start: {source_dates['claude']}")
-        if source_dates["codex"]:
-            print(f"codex_logs_start: {source_dates['codex']}")
-        if auto_since and not ns.since:
-            print(f"effective_start_date: {auto_since}")
-
-    # Detect repos from interactions
-    repos = collect_repos_from_interactions(interactions, config)
-
-    if not repos:
-        print("No git repositories detected from AI logs.", file=sys.stderr)
-        return 1
-
-    if ns.verbose:
-        print(f"repos_detected: {len(repos)}")
-        for repo_root in sorted(repos.keys()):
-            repo_name = Path(repo_root).name
-            print(f"  - {repo_name} ({repo_root})")
-
-    # Analyze each repo
-    options = AnalyzeOptions(
-        by=ns.by,
-        include_merges=False,
-        author=ns.author,
-        since=since,
-        until=ns.until,
-        outlier_method=ns.outlier_method,
-        outlier_z=ns.outlier_z,
-    )
-
-    all_git_daily: dict[str, dict[str, object]] = {}
-    for repo_root in repos:
-        repo_path = Path(repo_root)
-        try:
-            commits = collect_commit_metrics(repo_path, options)
-            if commits:
-                daily = daily_rows(commits)
-                # Aggregate into combined dict
-                for row in daily:
-                    day = str(row.get("day", ""))
-                    if not day:
-                        continue
-                    if day not in all_git_daily:
-                        all_git_daily[day] = {
-                            "day": day,
-                            "commits": 0,
-                            "delta": 0,
-                            "delta_ex_outliers": 0,
-                        }
-                    all_git_daily[day]["commits"] = int(all_git_daily[day]["commits"]) + int(
-                        str(row.get("commits", 0))
-                    )
-                    all_git_daily[day]["delta"] = int(all_git_daily[day]["delta"]) + int(
-                        str(row.get("delta", 0))
-                    )
-                    all_git_daily[day]["delta_ex_outliers"] = int(
-                        all_git_daily[day]["delta_ex_outliers"]
-                    ) + int(str(row.get("delta_ex_outliers", row.get("delta", 0))))
-        except RuntimeError:
-            if ns.verbose:
-                print(f"  (skipped: {repo_root})")
-            continue
-
-    # Detect sessions from interactions
-    sessions = detect_sessions(interactions)
-    daily_project = aggregate_daily_project_hours(sessions)
-
-    # Aggregate AI hours by day (across all projects in detected repos)
-    repo_names = {Path(r).name for r in repos}
-    ai_hours_by_day: dict[str, float] = {}
-    for h in daily_project:
-        if h.project in repo_names:
-            ai_hours_by_day[h.day] = ai_hours_by_day.get(h.day, 0.0) + h.session_hours
-
-    if not ai_hours_by_day:
-        print("No AI hours found for detected repos.", file=sys.stderr)
-        return 1
-
-    # Ensure all days with AI hours are in git_daily (even with zero commits)
-    # This counts days where you worked but didn't commit toward the denominator
-    for day in ai_hours_by_day:
-        if day not in all_git_daily:
-            all_git_daily[day] = {
-                "day": day,
-                "commits": 0,
-                "delta": 0,
-                "delta_ex_outliers": 0,
-            }
-
-    # Combine metrics
-    combined = combine_metrics(
-        git_daily=all_git_daily,
-        ai_hours=ai_hours_by_day,
-        since=since,
-        until=ns.until,
-    )
-
-    if not combined:
-        print("No data in specified date range.", file=sys.stderr)
-        return 1
-
-    summary = compute_summary(combined)
-    if summary is None:
-        print("Could not compute summary.", file=sys.stderr)
-        return 1
-
-    # Write output
-    output_dir.mkdir(parents=True, exist_ok=True)
-    combined_csv = output_dir / "productivity.csv"
-    write_combined_csv(combined_csv, combined)
-
-    print_combined_summary(summary)
-    print(f"csv: {combined_csv}")
-    return 0
-
-
 def _cmd_compare(ns: argparse.Namespace) -> int:
     """Compare productivity across beads/beadhub configurations."""
-    from datetime import datetime
-
     # Load path config
     config_path = Path(ns.config).expanduser() if ns.config else None
     config = load_path_config(config_path)
@@ -520,15 +109,15 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             print(f"  - {repo_name} ({repo_root})")
 
     # Get beads adoption date and beadhub status for each repo
-    repo_configs: dict[str, dict[str, object]] = {}
+    repo_configs: dict[str, RepoConfig] = {}
     for repo_root in repos:
         repo_path = Path(repo_root)
         beads_date = detect_beads_date(repo_path)
         is_beadhub = is_beadhub_repo(repo_path)
-        repo_configs[repo_root] = {
-            "beads_date": beads_date,
-            "is_beadhub": is_beadhub,
-        }
+        repo_configs[repo_root] = RepoConfig(
+            beads_date=beads_date,
+            is_beadhub=is_beadhub,
+        )
         if ns.verbose and (beads_date or is_beadhub):
             repo_name = repo_path.name
             info = []
@@ -552,25 +141,34 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         repo_by_name[repo_name] = repo_root
 
     # Process each session
-    session_metrics: list[dict[str, object]] = []
+    session_metrics: list[SessionMetrics] = []
+    skipped_no_repo = 0
+    skipped_before_start = 0
+
     for session in sessions:
         # Find the repo root for this session's project
-        repo_root = repo_by_name.get(session.project)
-        if repo_root is None:
+        if session.project not in repo_by_name:
+            skipped_no_repo += 1
             continue
+        repo_root = repo_by_name[session.project]
 
         # Get configuration for this session
-        repo_config = repo_configs.get(repo_root, {})
+        if repo_root not in repo_configs:
+            skipped_no_repo += 1
+            continue
+        repo_config = repo_configs[repo_root]
+
         session_date = datetime.fromtimestamp(session.start_ts).strftime("%Y-%m-%d")
 
         # Skip sessions before effective start date
         if auto_since and session_date < auto_since:
+            skipped_before_start += 1
             continue
 
         configuration = classify_session(
             session_start_date=session_date,
-            beads_date=repo_config.get("beads_date"),
-            is_beadhub=bool(repo_config.get("is_beadhub")),
+            beads_date=repo_config["beads_date"],
+            is_beadhub=repo_config["is_beadhub"],
         )
 
         # Get commits during this session
@@ -581,15 +179,19 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             author=ns.author,
         )
 
-        total_delta = sum(int(c.get("delta", 0)) for c in commits)
+        total_delta = sum(c["delta"] for c in commits)
         hours = session.estimated_seconds / 3600
 
-        session_metrics.append({
-            "configuration": configuration,
-            "hours": hours,
-            "commits": len(commits),
-            "delta": total_delta,
-        })
+        session_metrics.append(SessionMetrics(
+            configuration=configuration,
+            hours=hours,
+            commits=len(commits),
+            delta=total_delta,
+        ))
+
+    if ns.verbose and (skipped_no_repo > 0 or skipped_before_start > 0):
+        print(f"sessions_skipped_no_repo: {skipped_no_repo}")
+        print(f"sessions_skipped_before_start: {skipped_before_start}")
 
     if not session_metrics:
         print("No sessions matched the criteria.", file=sys.stderr)
@@ -606,8 +208,8 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         cfg = aggregated[config_name]
         if cfg["hours"] > 0 or cfg["sessions"] > 0:
             print(
-                f"{config_name:<16} {int(cfg['sessions']):>8} {cfg['hours']:>8.1f} "
-                f"{int(cfg['commits']):>8} {int(cfg['delta']):>10} "
+                f"{config_name:<16} {cfg['sessions']:>8} {cfg['hours']:>8.1f} "
+                f"{cfg['commits']:>8} {cfg['delta']:>10} "
                 f"{cfg['delta_per_hour']:>10.1f} {cfg['commits_per_hour']:>10.2f}"
             )
 
@@ -622,272 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    analyze = sub.add_parser(
-        "analyze", help="Extract per-commit and per-day metrics from git history."
-    )
-    analyze.add_argument("--repo", default=".", help="Path to the git repo to analyze.")
-    analyze.add_argument(
-        "--output-dir", default="out/git-history", help="Directory to write CSV outputs."
-    )
-    analyze.add_argument(
-        "--by", choices=["committer", "author"], default="committer", help="Which date to group by."
-    )
-    analyze.add_argument("--include-merges", action="store_true", help="Include merge commits.")
-    analyze.add_argument(
-        "--author", default=None, help="Filter commits by author regex (git log --author)."
-    )
-    analyze.add_argument(
-        "--since", default=None, help="Only include commits since this date (git log --since)."
-    )
-    analyze.add_argument(
-        "--until", default=None, help="Only include commits until this date (git log --until)."
-    )
-    analyze.add_argument(
-        "--outlier-method",
-        choices=["none", "mad-log-delta"],
-        default="none",
-        help="How to flag outlier commits by change size.",
-    )
-    analyze.add_argument(
-        "--outlier-z", type=float, default=3.5, help="Robust z-score threshold (default: 3.5)."
-    )
-    analyze.set_defaults(func=_cmd_analyze)
-
-    plot = sub.add_parser("plot-rates", help="Plot commits/hour and delta/hour over active days.")
-    plot.add_argument("--daily-csv", required=True, help="Path to daily_metrics.csv.")
-    plot.add_argument(
-        "--output-png", default=None, help="Output PNG path (default: alongside daily CSV)."
-    )
-    plot.add_argument(
-        "--hours",
-        choices=["estimated", "strict"],
-        default="estimated",
-        help="Which hour estimate to use.",
-    )
-    plot.add_argument(
-        "--rolling-window", type=int, default=7, help="Rolling mean window (default: 7)."
-    )
-    plot.add_argument("--dpi", type=int, default=160, help="PNG DPI (default: 160).")
-    plot.add_argument("--title", default=None, help="Plot title.")
-    plot.set_defaults(func=_cmd_plot_rates)
-
-    progression = sub.add_parser(
-        "plot-progression",
-        help="Plot rolling mean delta/hour vs cumulative estimated hours (active days only).",
-    )
-    progression.add_argument("--daily-csv", required=True, help="Path to daily_metrics.csv.")
-    progression.add_argument(
-        "--output-png", default=None, help="Output PNG path (default: alongside daily CSV)."
-    )
-    progression.add_argument(
-        "--hours",
-        choices=["estimated", "strict"],
-        default="estimated",
-        help="Which hour estimate to use.",
-    )
-    progression.add_argument(
-        "--window-hours",
-        type=float,
-        default=40.0,
-        help="Rolling window size in hours (default: 40).",
-    )
-    progression.add_argument("--dpi", type=int, default=160, help="PNG DPI (default: 160).")
-    progression.add_argument("--title", default=None, help="Plot title.")
-    progression.add_argument("--log-y", action="store_true", help="Force log y-scale.")
-    progression.set_defaults(func=_cmd_plot_progression)
-
     beads = sub.add_parser(
         "beads", help="Report beads database size and bead count from .beads/ in repos."
     )
     beads.add_argument("repos", nargs="+", help="Repo paths to analyze for .beads usage.")
     beads.add_argument("--output-csv", default=None, help="Write a summary CSV to this path.")
     beads.set_defaults(func=_cmd_beads)
-
-    ai_hours = sub.add_parser(
-        "ai-hours",
-        help="Estimate work hours from AI assistant (Claude Code, Codex) conversation logs.",
-    )
-    ai_hours.add_argument(
-        "--output-dir",
-        default="out/ai-hours",
-        help="Directory to write CSV outputs (default: out/ai-hours).",
-    )
-    ai_hours.add_argument(
-        "--project",
-        default=None,
-        help="Filter to a specific project by name (last path element, e.g., 'beadhub').",
-    )
-    ai_hours.add_argument(
-        "--claude-dir",
-        default=None,
-        help="Path to Claude Code config dir (default: ~/.claude).",
-    )
-    ai_hours.add_argument(
-        "--codex-dir",
-        default=None,
-        help="Path to Codex config dir (default: ~/.codex).",
-    )
-    ai_hours.set_defaults(func=_cmd_ai_hours)
-
-    combine = sub.add_parser(
-        "combine",
-        help="Combine git metrics with AI hours for accurate productivity rates.",
-    )
-    combine.add_argument(
-        "--git-daily",
-        nargs="+",
-        required=True,
-        help="Path(s) to daily_metrics.csv from git analysis. Multiple paths are aggregated.",
-    )
-    combine.add_argument(
-        "--ai-sessions",
-        default=None,
-        help="Path to ai_sessions.csv (for per-project hours).",
-    )
-    combine.add_argument(
-        "--ai-sittings",
-        default=None,
-        help="Path to ai_sittings.csv (for total active hours).",
-    )
-    combine.add_argument(
-        "--project",
-        default=None,
-        help="Filter AI sessions to this project (required with --ai-sessions).",
-    )
-    combine.add_argument(
-        "--since",
-        default=None,
-        help="Only include days on or after this date (YYYY-MM-DD).",
-    )
-    combine.add_argument(
-        "--until",
-        default=None,
-        help="Only include days on or before this date (YYYY-MM-DD).",
-    )
-    combine.add_argument(
-        "--output-dir",
-        default="out/combined",
-        help="Directory to write CSV outputs (default: out/combined).",
-    )
-    combine.set_defaults(func=_cmd_combine)
-
-    batch = sub.add_parser(
-        "batch-analyze",
-        help="Analyze multiple git repos and aggregate daily metrics.",
-    )
-    batch.add_argument(
-        "repos",
-        nargs="+",
-        help="Paths to git repos to analyze.",
-    )
-    batch.add_argument(
-        "--output-dir",
-        default="out/batch",
-        help="Directory to write aggregated CSV (default: out/batch).",
-    )
-    batch.add_argument(
-        "--by",
-        choices=["committer", "author"],
-        default="committer",
-        help="Which date to group by.",
-    )
-    batch.add_argument(
-        "--include-merges",
-        action="store_true",
-        help="Include merge commits.",
-    )
-    batch.add_argument(
-        "--author",
-        default=None,
-        help="Filter commits by author regex.",
-    )
-    batch.add_argument(
-        "--since",
-        default=None,
-        help="Only include commits since this date.",
-    )
-    batch.add_argument(
-        "--until",
-        default=None,
-        help="Only include commits until this date.",
-    )
-    batch.add_argument(
-        "--outlier-method",
-        choices=["none", "mad-log-delta"],
-        default="none",
-        help="How to flag outlier commits.",
-    )
-    batch.add_argument(
-        "--outlier-z",
-        type=float,
-        default=3.5,
-        help="Robust z-score threshold.",
-    )
-    batch.set_defaults(func=_cmd_batch_analyze)
-
-    productivity = sub.add_parser(
-        "productivity",
-        help="Unified productivity analysis: auto-detect repos from AI logs and compute metrics.",
-    )
-    productivity.add_argument(
-        "--author",
-        required=True,
-        help="Filter commits by author regex (required to avoid mixing authors).",
-    )
-    productivity.add_argument(
-        "--since",
-        default=None,
-        help="Only include data on or after this date (YYYY-MM-DD).",
-    )
-    productivity.add_argument(
-        "--until",
-        default=None,
-        help="Only include data on or before this date (YYYY-MM-DD).",
-    )
-    productivity.add_argument(
-        "--output-dir",
-        default="out/productivity",
-        help="Directory to write outputs (default: out/productivity).",
-    )
-    productivity.add_argument(
-        "--config",
-        default=None,
-        help="Path config file for remapping/ignoring paths (default: ~/.config/agent-taylor/paths.toml).",
-    )
-    productivity.add_argument(
-        "--claude-dir",
-        default=None,
-        help="Path to Claude Code config dir (default: ~/.claude).",
-    )
-    productivity.add_argument(
-        "--codex-dir",
-        default=None,
-        help="Path to Codex config dir (default: ~/.codex).",
-    )
-    productivity.add_argument(
-        "--by",
-        choices=["committer", "author"],
-        default="committer",
-        help="Which date to group by (default: committer).",
-    )
-    productivity.add_argument(
-        "--outlier-method",
-        choices=["none", "mad-log-delta"],
-        default="mad-log-delta",
-        help="How to flag outlier commits (default: mad-log-delta).",
-    )
-    productivity.add_argument(
-        "--outlier-z",
-        type=float,
-        default=3.5,
-        help="Robust z-score threshold (default: 3.5).",
-    )
-    productivity.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Show which repos were detected.",
-    )
-    productivity.set_defaults(func=_cmd_productivity)
 
     compare = sub.add_parser(
         "compare",

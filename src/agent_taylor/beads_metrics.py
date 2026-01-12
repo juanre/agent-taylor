@@ -1,3 +1,6 @@
+# ABOUTME: Gathers metrics about beads database usage in repositories.
+# ABOUTME: Reports database sizes, issue counts, and writes summary CSVs.
+
 from __future__ import annotations
 
 import csv
