@@ -11,6 +11,8 @@ from .ai_hours import (
     collect_interactions,
     detect_sessions,
     detect_sittings,
+    detect_source_date_ranges,
+    effective_start_date,
     print_summary as print_ai_hours_summary,
     write_sessions_csv,
     write_sittings_csv,
@@ -341,6 +343,21 @@ def _cmd_productivity(ns: argparse.Namespace) -> int:
         print("No interactions found in AI assistant logs.", file=sys.stderr)
         return 1
 
+    # Detect source date ranges and compute effective start date
+    source_dates = detect_source_date_ranges(claude_dir=claude_dir, codex_dir=codex_dir)
+    auto_since = effective_start_date(source_dates)
+
+    # Use auto-detected start date if --since not provided
+    since = ns.since if ns.since else auto_since
+
+    if ns.verbose:
+        if source_dates["claude"]:
+            print(f"claude_logs_start: {source_dates['claude']}")
+        if source_dates["codex"]:
+            print(f"codex_logs_start: {source_dates['codex']}")
+        if auto_since and not ns.since:
+            print(f"effective_start_date: {auto_since}")
+
     # Detect repos from interactions
     repos = collect_repos_from_interactions(interactions, config)
 
@@ -359,7 +376,7 @@ def _cmd_productivity(ns: argparse.Namespace) -> int:
         by=ns.by,
         include_merges=False,
         author=ns.author,
-        since=ns.since,
+        since=since,
         until=ns.until,
         outlier_method=ns.outlier_method,
         outlier_z=ns.outlier_z,
@@ -428,7 +445,7 @@ def _cmd_productivity(ns: argparse.Namespace) -> int:
     combined = combine_metrics(
         git_daily=all_git_daily,
         ai_hours=ai_hours_by_day,
-        since=ns.since,
+        since=since,
         until=ns.until,
     )
 

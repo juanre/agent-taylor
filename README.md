@@ -215,7 +215,6 @@ everything in one step. This is the recommended way to measure productivity.
 ```bash
 uv run agent-taylor productivity \
   --author "Your Name" \
-  --since 2025-12-01 \
   --output-dir out/productivity \
   --verbose
 ```
@@ -223,32 +222,42 @@ uv run agent-taylor productivity \
 **How it works:**
 
 1. Parses AI logs from Claude Code (`~/.claude/`) and Codex (`~/.codex/`)
-2. Extracts working directory paths from each conversation
-3. Detects git repos from those paths (runs `git rev-parse --show-toplevel`)
-4. Analyzes each discovered repo for commits matching your author filter
-5. Combines git metrics with AI session hours
-6. Outputs unified productivity CSV
+2. Detects the earliest date from each source and uses the later one as start date
+3. Extracts working directory paths from each conversation
+4. Detects git repos from those paths (runs `git rev-parse --show-toplevel`)
+5. Analyzes each discovered repo for commits matching your author filter
+6. Combines git metrics with AI session hours
+7. Outputs unified productivity CSV
+
+**Automatic date range detection:**
+
+When `--since` is not specified, the command automatically determines the start date by finding
+the earliest log entry from both Claude Code and Codex, then using the *later* of the two. This
+ensures you only analyze periods where both log sources have complete data.
 
 **Options:**
 
 | Flag | Description |
 |------|-------------|
 | `--author` | **Required.** Filter commits by author regex |
-| `--since` | Start date (YYYY-MM-DD) |
+| `--since` | Start date (YYYY-MM-DD). Auto-detected if not specified. |
 | `--until` | End date (YYYY-MM-DD) |
 | `--output-dir` | Output directory (default: `out/productivity`) |
 | `--config` | Path config for remapping/ignoring paths |
-| `--verbose` | Show which repos were detected |
+| `--verbose` | Show source date ranges and detected repos |
 | `--outlier-method` | Outlier detection method (default: `mad-log-delta`) |
 
-**Output:**
+**Output (with --verbose):**
 
 ```
+claude_logs_start: 2025-01-15
+codex_logs_start: 2025-06-01
+effective_start_date: 2025-06-01
 repos_detected: 3
   - beadhub (/Users/name/prj/beadhub)
   - llmring (/Users/name/prj/llmring)
   - pgdbm (/Users/name/prj/pgdbm)
-date_range: 2025-12-01..2026-01-12
+date_range: 2025-06-01..2026-01-12
 days_analyzed: 28
 total_commits: 342
 total_ai_hours: 96.7

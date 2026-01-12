@@ -527,3 +527,153 @@ def print_summary(
             by_project[h.project] = by_project.get(h.project, 0) + h.session_hours
         for proj, hours in sorted(by_project.items(), key=lambda x: -x[1])[:10]:
             print(f"  {proj}: {hours:.1f}h")
+
+
+def _parse_timestamp_value(ts_raw: object) -> Optional[float]:
+    """Parse a timestamp from raw value (ISO string or numeric)."""
+    if ts_raw is None:
+        return None
+    try:
+        if isinstance(ts_raw, str):
+            ts_str = ts_raw.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_str)
+            return dt.timestamp()
+        else:
+            ts = float(ts_raw)
+            if ts > 1e12:
+                ts = ts / 1000.0
+            return ts
+    except (ValueError, TypeError):
+        return None
+
+
+def _earliest_claude_timestamp(claude_dir: Path) -> Optional[float]:
+    """Find the earliest timestamp from Claude Code logs."""
+    projects_dir = claude_dir / "projects"
+    if not projects_dir.exists():
+        return None
+
+    earliest: Optional[float] = None
+
+    for project_dir in projects_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        for session_file in project_dir.glob("*.jsonl"):
+            try:
+                with session_file.open("r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            msg = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        msg_type = msg.get("type", "")
+                        if msg_type not in ("user", "assistant"):
+                            continue
+
+                        ts = _parse_timestamp_value(msg.get("timestamp"))
+                        if ts is not None:
+                            if earliest is None or ts < earliest:
+                                earliest = ts
+            except (OSError, IOError):
+                continue
+
+    return earliest
+
+
+def _earliest_codex_timestamp(codex_dir: Path) -> Optional[float]:
+    """Find the earliest timestamp from Codex logs."""
+    sessions_dir = codex_dir / "sessions"
+    if not sessions_dir.exists():
+        return None
+
+    earliest: Optional[float] = None
+
+    for session_file in sessions_dir.rglob("*.jsonl"):
+        try:
+            with session_file.open("r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    msg_type = msg.get("type", "")
+                    payload = msg.get("payload", {})
+
+                    # Only count actual message types, not session_meta
+                    if msg_type == "response_item":
+                        payload_type = payload.get("type", "")
+                        if payload_type not in ("message", "function_call"):
+                            continue
+                    elif msg_type == "event_msg":
+                        payload_type = payload.get("type", "")
+                        if payload_type != "user_message":
+                            continue
+                    else:
+                        continue
+
+                    ts = _parse_timestamp_value(msg.get("timestamp"))
+                    if ts is not None:
+                        if earliest is None or ts < earliest:
+                            earliest = ts
+        except (OSError, IOError):
+            continue
+
+    return earliest
+
+
+def detect_source_date_ranges(
+    claude_dir: Optional[Path] = None,
+    codex_dir: Optional[Path] = None,
+) -> dict[str, Optional[str]]:
+    """Detect the earliest date from each AI assistant log source.
+
+    Returns:
+        Dict with 'claude' and 'codex' keys, each mapping to a date string
+        (YYYY-MM-DD) or None if no data found for that source.
+    """
+    if claude_dir is None:
+        claude_dir = Path.home() / ".claude"
+    if codex_dir is None:
+        codex_dir = Path.home() / ".codex"
+
+    result: dict[str, Optional[str]] = {"claude": None, "codex": None}
+
+    claude_ts = _earliest_claude_timestamp(claude_dir)
+    if claude_ts is not None:
+        result["claude"] = datetime.fromtimestamp(claude_ts).strftime("%Y-%m-%d")
+
+    codex_ts = _earliest_codex_timestamp(codex_dir)
+    if codex_ts is not None:
+        result["codex"] = datetime.fromtimestamp(codex_ts).strftime("%Y-%m-%d")
+
+    return result
+
+
+def effective_start_date(source_dates: dict[str, Optional[str]]) -> Optional[str]:
+    """Compute the effective start date from source date ranges.
+
+    Returns the later of the two dates when both sources have data,
+    or the single available date when only one source has data.
+    """
+    claude_date = source_dates.get("claude")
+    codex_date = source_dates.get("codex")
+
+    if claude_date is None and codex_date is None:
+        return None
+
+    if claude_date is None:
+        return codex_date
+
+    if codex_date is None:
+        return claude_date
+
+    # Both have data - return the later date
+    return max(claude_date, codex_date)
