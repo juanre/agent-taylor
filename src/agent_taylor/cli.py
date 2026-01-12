@@ -50,7 +50,7 @@ from .plotting import (
 
 def _version() -> str:
     try:
-        return metadata.version("git-hist-review")
+        return metadata.version("agent-taylor")
     except metadata.PackageNotFoundError:
         return "0.0.0"
 
@@ -322,7 +322,7 @@ def _cmd_combine(ns: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="git-hist-review", description="Git history analysis utilities."
+        prog="agent-taylor", description="Git history analysis utilities."
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
 

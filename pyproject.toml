@@ -1,5 +1,5 @@
 [project]
-name = "git-hist-review"
+name = "agent-taylor"
 version = "0.1.0"
 description = "Git history analysis + productivity metrics (commits/hour, delta/hour) with robust outlier handling."
 readme = "README.md"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-git-hist-review = "git_hist_review.cli:main"
+agent-taylor = "agent_taylor.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.22,<0.10.0"]
@@ -33,7 +33,7 @@ include = '\.pyi?$'
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["git_hist_review", "app", "services", "shared"]
+known_first_party = ["agent_taylor", "app", "services", "shared"]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 multi_line_output = 3
 include_trailing_comma = true

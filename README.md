@@ -1,4 +1,4 @@
-## git-hist-review
+## agent-taylor
 
 Utilities to analyze a git repository’s commit history and produce:
 
@@ -22,7 +22,7 @@ uv sync
 #### Analyze a repo
 
 ```bash
-uv run git-hist-review analyze \
+uv run agent-taylor analyze \
   --repo ../beadhub \
   --output-dir out/beadhub-history \
   --outlier-method mad-log-delta
@@ -46,7 +46,7 @@ Hours:
 #### Plot commits/hour and delta/hour (PNG)
 
 ```bash
-uv run git-hist-review plot-rates \
+uv run agent-taylor plot-rates \
   --daily-csv out/beadhub-history/daily_metrics.csv \
   --output-png out/beadhub-history/rates_over_time.png \
   --hours estimated \
@@ -64,7 +64,7 @@ This is the “efficiency over time” plot: x is cumulative estimated hours acr
 mean of delta/hour.
 
 ```bash
-uv run git-hist-review plot-progression \
+uv run agent-taylor plot-progression \
   --daily-csv out/beadhub-history/daily_metrics.csv \
   --output-png out/beadhub-history/delta_progression.png \
   --hours estimated \
@@ -80,8 +80,8 @@ The `ai-hours` command solves this by parsing conversation logs from Claude Code
 detect actual work sessions.
 
 ```bash
-uv run git-hist-review ai-hours --output-dir out/ai-hours
-uv run git-hist-review ai-hours --project beadhub --output-dir out/ai-hours
+uv run agent-taylor ai-hours --output-dir out/ai-hours
+uv run agent-taylor ai-hours --project beadhub --output-dir out/ai-hours
 ```
 
 Outputs:
@@ -162,7 +162,7 @@ productivity rates.
 
 ```bash
 # Single project: beadhub delta per AI session hour
-uv run git-hist-review combine \
+uv run agent-taylor combine \
   --git-daily out/beadhub-history/daily_metrics.csv \
   --ai-sessions out/beadhub-history/ai_sessions.csv \
   --project beadhub \
@@ -170,7 +170,7 @@ uv run git-hist-review combine \
   --output-dir out/beadhub-combined
 
 # Multiple repos: aggregate all beadhub-* repos vs sitting time
-uv run git-hist-review combine \
+uv run agent-taylor combine \
   --git-daily out/beadhub-history/daily_metrics.csv out/beadhub-be/daily_metrics.csv \
   --ai-sittings out/ai-hours-all/ai_sittings.csv \
   --since 2025-12-11 \
@@ -212,5 +212,5 @@ than actual.
 Reports the size of `.beads/beads.db` and counts beads via `.beads/issues.jsonl` line count.
 
 ```bash
-uv run git-hist-review beads ~/prj/llmring-all/llmring ~/prj/llmring-all/llmring-api --output-csv out/beads.csv
+uv run agent-taylor beads ~/prj/llmring-all/llmring ~/prj/llmring-all/llmring-api --output-csv out/beads.csv
 ```
