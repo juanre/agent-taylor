@@ -346,6 +346,115 @@ class TestLogBundleEnvVar:
         assert result is None
 
 
+class TestLogBundleFromConfig:
+    """Tests for log_bundle from config file in _cmd_compare."""
+
+    def test_uses_config_log_bundle_when_no_cli_or_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """_cmd_compare uses config.log_bundle when CLI and env var not set."""
+        import argparse
+        from agent_taylor.cli import _cmd_compare
+
+        # Clear env var
+        monkeypatch.delenv("AGENT_TAYLOR_LOG_BUNDLE", raising=False)
+
+        # Create bundle and config
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(f'log_bundle = "{bundle}"')
+
+        ns = argparse.Namespace(
+            config=str(config_file),
+            log_bundle=None,  # No CLI flag
+            claude_dir=None,
+            codex_dir=None,
+            author="Test",
+            verbose=False,
+            history=False,
+        )
+
+        # Will fail with "No interactions" but that proves it used the bundle
+        result = _cmd_compare(ns)
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "No interactions found" in captured.err
+
+    def test_cli_overrides_config_log_bundle(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """CLI --log-bundle takes priority over config file."""
+        import argparse
+        from agent_taylor.cli import _cmd_compare
+
+        # Clear env var
+        monkeypatch.delenv("AGENT_TAYLOR_LOG_BUNDLE", raising=False)
+
+        # Create bundles
+        cli_bundle = tmp_path / "cli-bundle"
+        cli_bundle.mkdir()
+        config_bundle = tmp_path / "config-bundle"
+        config_bundle.mkdir()
+
+        # Config points to config_bundle
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(f'log_bundle = "{config_bundle}"')
+
+        ns = argparse.Namespace(
+            config=str(config_file),
+            log_bundle=str(cli_bundle),  # CLI flag set
+            claude_dir=None,
+            codex_dir=None,
+            author="Test",
+            verbose=False,
+            history=False,
+        )
+
+        _cmd_compare(ns)
+
+        # It would error "does not exist" if it tried the wrong bundle
+        # Both exist, so it proceeds to "No interactions found"
+        captured = capsys.readouterr()
+        assert "No interactions found" in captured.err
+
+    def test_env_var_overrides_config_log_bundle(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Environment variable takes priority over config file."""
+        import argparse
+        from agent_taylor.cli import _cmd_compare
+
+        # Create bundles
+        env_bundle = tmp_path / "env-bundle"
+        env_bundle.mkdir()
+        config_bundle = tmp_path / "config-bundle"
+        config_bundle.mkdir()
+
+        # Set env var to env_bundle
+        monkeypatch.setenv("AGENT_TAYLOR_LOG_BUNDLE", str(env_bundle))
+
+        # Config points to config_bundle
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(f'log_bundle = "{config_bundle}"')
+
+        ns = argparse.Namespace(
+            config=str(config_file),
+            log_bundle=None,  # No CLI flag
+            claude_dir=None,
+            codex_dir=None,
+            author="Test",
+            verbose=False,
+            history=False,
+        )
+
+        _cmd_compare(ns)
+
+        captured = capsys.readouterr()
+        assert "No interactions found" in captured.err
+
+
 class TestLogBundleValidation:
     """Tests for log bundle path validation in _cmd_compare."""
 

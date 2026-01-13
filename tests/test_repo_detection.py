@@ -98,6 +98,88 @@ paths = ["/tmp"]
         assert config.remap == {}
         assert config.ignore == set()
 
+    def test_parses_log_bundle(self, tmp_path: Path) -> None:
+        """load_path_config correctly parses log_bundle setting."""
+        from agent_taylor.repo_detection import load_path_config
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            """\
+log_bundle = "/Users/juan/Documents/agent-logs"
+"""
+        )
+
+        config = load_path_config(config_file)
+
+        assert config.log_bundle == Path("/Users/juan/Documents/agent-logs")
+
+    def test_log_bundle_expands_tilde(self, tmp_path: Path) -> None:
+        """load_path_config expands ~ in log_bundle path."""
+        from agent_taylor.repo_detection import load_path_config
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            """\
+log_bundle = "~/Documents/agent-logs"
+"""
+        )
+
+        config = load_path_config(config_file)
+
+        assert config.log_bundle == Path.home() / "Documents" / "agent-logs"
+
+    def test_log_bundle_defaults_to_none(self, tmp_path: Path) -> None:
+        """load_path_config returns None log_bundle when not specified."""
+        from agent_taylor.repo_detection import load_path_config
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            """\
+[remap]
+"/old" = "/new"
+"""
+        )
+
+        config = load_path_config(config_file)
+
+        assert config.log_bundle is None
+
+    def test_log_bundle_with_other_sections(self, tmp_path: Path) -> None:
+        """load_path_config parses log_bundle alongside remap and ignore."""
+        from agent_taylor.repo_detection import load_path_config
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            """\
+log_bundle = "~/Documents/agent-logs"
+
+[remap]
+"/old" = "/new"
+
+[ignore]
+paths = ["/tmp"]
+"""
+        )
+
+        config = load_path_config(config_file)
+
+        assert config.log_bundle == Path.home() / "Documents" / "agent-logs"
+        assert config.remap == {"/old": "/new"}
+        assert config.ignore == {"/tmp"}
+
+    def test_invalid_log_bundle_type_returns_empty_config(self, tmp_path: Path) -> None:
+        """load_path_config returns empty config for non-string log_bundle."""
+        from agent_taylor.repo_detection import load_path_config
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("log_bundle = 123")
+
+        config = load_path_config(config_file)
+
+        assert config.log_bundle is None
+        assert config.remap == {}
+        assert config.ignore == set()
+
 
 class TestDetectGitRoot:
     """Tests for detect_git_root function."""

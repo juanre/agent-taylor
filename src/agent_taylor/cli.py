@@ -100,8 +100,10 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     config_path = Path(ns.config).expanduser() if ns.config else None
     config = load_path_config(config_path)
 
-    # Resolve log bundle (CLI flag > env var > None)
+    # Resolve log bundle (CLI flag > env var > config > None)
     log_bundle = _resolve_log_bundle(ns.log_bundle)
+    if log_bundle is None and config.log_bundle is not None:
+        log_bundle = config.log_bundle
 
     # Validate log bundle if provided
     if log_bundle is not None:
