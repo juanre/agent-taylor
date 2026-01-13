@@ -90,6 +90,62 @@ def _output_graph(daily: list, output_path: Path) -> None:
     plt.close()
 
 
+def _output_bucket_graph(daily_by_config: list, output_path: Path) -> None:
+    """Generate productivity graph showing evolution of three configuration buckets.
+
+    Args:
+        daily_by_config: List of DailyMetrics dicts with date and configuration.
+        output_path: Path to save the PNG file.
+    """
+    import matplotlib.pyplot as plt
+    from collections import defaultdict
+
+    # Group data by configuration
+    config_data: dict[str, dict[str, float]] = defaultdict(dict)
+    all_dates: set[str] = set()
+
+    for d in daily_by_config:
+        config_data[d["configuration"]][d["date"]] = d["delta_per_hour"]
+        all_dates.add(d["date"])
+
+    # Sort dates
+    dates = sorted(all_dates)
+
+    # Configuration colors and order
+    configs = ["none", "beads", "beads+beadhub"]
+    colors = {"none": "#94a3b8", "beads": "#2563eb", "beads+beadhub": "#16a34a"}
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    for config in configs:
+        if config not in config_data:
+            continue
+        # Get values for each date (0 if no data for that date)
+        values = [config_data[config].get(date, 0) for date in dates]
+        ax.plot(
+            range(len(dates)),
+            values,
+            color=colors[config],
+            marker="o",
+            markersize=4,
+            linewidth=1.5,
+            label=config,
+            alpha=0.8,
+        )
+
+    ax.set_xlabel("Date")
+    ax.set_ylabel("delta/hr")
+    ax.set_xticks(range(len(dates)))
+    ax.set_xticklabels(dates, rotation=45, ha="right", fontsize=7)
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+
+    plt.title("Productivity by Configuration Over Time")
+    fig.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+
 def _version() -> str:
     try:
         return metadata.version("agent-taylor")
@@ -349,15 +405,24 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         print("No sessions matched the criteria.", file=sys.stderr)
         return 1
 
-    # Handle --graph (implies --history --combined)
+    # Handle --graph
     if ns.graph:
-        daily = aggregate_by_date(session_metrics)
-        # Filter out days with no commits (no progress)
-        daily = [d for d in daily if d["commits"] > 0]
-        if not daily:
-            print("No days with commits to graph.", file=sys.stderr)
-            return 1
-        _output_graph(daily, Path(ns.graph).expanduser())
+        if ns.combined:
+            # Combined: single line for all configurations
+            daily = aggregate_by_date(session_metrics)
+            daily = [d for d in daily if d["commits"] > 0]
+            if not daily:
+                print("No days with commits to graph.", file=sys.stderr)
+                return 1
+            _output_graph(daily, Path(ns.graph).expanduser())
+        else:
+            # Default: show three bucket lines
+            daily = aggregate_by_date_and_configuration(session_metrics)
+            daily = [d for d in daily if d["commits"] > 0]
+            if not daily:
+                print("No days with commits to graph.", file=sys.stderr)
+                return 1
+            _output_bucket_graph(daily, Path(ns.graph).expanduser())
         print(f"Graph saved to {ns.graph}")
         return 0
 
@@ -578,7 +643,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument(
         "--graph",
         default=None,
-        help="Output productivity graph to file (PNG). Implies --history --combined.",
+        help="Output productivity graph to file (PNG). Shows three bucket lines by default; use --combined for single line.",
     )
     compare.add_argument(
         "--projects-csv",
