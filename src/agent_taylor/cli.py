@@ -267,10 +267,15 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             continue
 
         # Find the repo root for this session's project
-        if session.project not in repo_by_name:
+        if session.project in repo_by_name:
+            repo_root = repo_by_name[session.project]
+        elif session.project.startswith("beadhub-") and "beadhub" in repo_by_name:
+            # Worktrees of beadhub - map to main repo for time tracking
+            # (commits are already in the main repo)
+            repo_root = repo_by_name["beadhub"]
+        else:
             skipped_no_repo += 1
             continue
-        repo_root = repo_by_name[session.project]
 
         # Get configuration for this session
         if repo_root not in repo_configs:
