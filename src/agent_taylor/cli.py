@@ -280,6 +280,71 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sync(ns: argparse.Namespace) -> int:
+    """Sync local AI logs to a bundle directory."""
+    import shutil
+    import socket
+
+    # Load config for log_bundle setting
+    config_path = Path(ns.config).expanduser() if ns.config else None
+    config = load_path_config(config_path)
+
+    # Resolve bundle location (CLI > env > config)
+    bundle = _resolve_log_bundle(ns.bundle)
+    if bundle is None and config.log_bundle is not None:
+        bundle = config.log_bundle
+
+    if bundle is None:
+        print(
+            "Error: No bundle location specified. "
+            "Use --bundle, set AGENT_TAYLOR_LOG_BUNDLE, "
+            "or configure log_bundle in ~/.config/agent-taylor/paths.toml",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Validate bundle exists and is a directory
+    if not bundle.exists():
+        print(f"Error: Bundle directory does not exist: {bundle}", file=sys.stderr)
+        return 1
+    if not bundle.is_dir():
+        print(f"Error: Bundle path is not a directory: {bundle}", file=sys.stderr)
+        return 1
+
+    # Determine machine name
+    machine_name = ns.machine_name if ns.machine_name else socket.gethostname()
+
+    # Create machine directory
+    machine_dir = bundle / machine_name
+    machine_dir.mkdir(exist_ok=True)
+
+    # Find source directories
+    home = Path.home()
+    claude_src = home / ".claude"
+    codex_src = home / ".codex"
+
+    synced_any = False
+
+    # Sync claude logs
+    if claude_src.exists() and claude_src.is_dir():
+        claude_dst = machine_dir / "claude"
+        shutil.copytree(claude_src, claude_dst, dirs_exist_ok=True)
+        print(f"Synced {claude_src} -> {claude_dst}")
+        synced_any = True
+
+    # Sync codex logs
+    if codex_src.exists() and codex_src.is_dir():
+        codex_dst = machine_dir / "codex"
+        shutil.copytree(codex_src, codex_dst, dirs_exist_ok=True)
+        print(f"Synced {codex_src} -> {codex_dst}")
+        synced_any = True
+
+    if not synced_any:
+        print("Nothing to sync - no ~/.claude or ~/.codex directories found.")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-taylor", description="Git history analysis utilities."
@@ -336,6 +401,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show daily breakdown over time.",
     )
     compare.set_defaults(func=_cmd_compare)
+
+    sync = sub.add_parser(
+        "sync",
+        help="Sync local AI logs to a bundle directory.",
+    )
+    sync.add_argument(
+        "--config",
+        default=None,
+        help="Path config file for log_bundle setting.",
+    )
+    sync.add_argument(
+        "--bundle",
+        default=None,
+        help="Bundle directory (default: from env/config).",
+    )
+    sync.add_argument(
+        "--machine-name",
+        default=None,
+        help="Machine name subdirectory (default: hostname).",
+    )
+    sync.set_defaults(func=_cmd_sync)
 
     return parser
 
