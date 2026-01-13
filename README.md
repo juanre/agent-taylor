@@ -63,6 +63,7 @@ beads+beadhub          39      5.3        9       8318     1567.7       1.70
 | `--config` | Path config for remapping/ignoring paths |
 | `--claude-dir` | Claude Code config dir (default: `~/.claude`) |
 | `--codex-dir` | Codex config dir (default: `~/.codex`) |
+| `--log-bundle` | Directory with multi-machine logs (see below) |
 | `--verbose` | Show detected repos, adoption dates, and skipped sessions |
 | `--history` | Show daily breakdown over time (skips empty days) |
 
@@ -72,6 +73,9 @@ If you've moved repos or want to ignore certain paths, create a config file at
 `~/.config/agent-taylor/paths.toml`:
 
 ```toml
+# Log bundle for multi-machine setup (see below)
+log_bundle = "~/Documents/agent-logs"
+
 [remap]
 "/old/path/to/repo" = "/new/path/to/repo"
 
@@ -103,3 +107,60 @@ Each session includes **3 minutes of thinking time** prepended to account for wo
 - **beadhub**: Detected by repo name (`beadhub` or `beadhub-*`)
 
 A session is classified based on the repo's configuration state at the time the session started.
+
+### Multi-machine setup
+
+If you work on multiple computers, you can aggregate logs from all machines into a single "log bundle" directory.
+
+**Log bundle structure:**
+
+```
+~/Documents/agent-logs/
+├── laptop/
+│   ├── claude/          # Copied from ~/.claude on laptop
+│   └── codex/           # Copied from ~/.codex on laptop
+├── desktop/
+│   ├── claude/
+│   └── codex/
+└── old-machine/
+    └── claude/          # codex/ optional
+```
+
+**Configuration (pick one):**
+
+```bash
+# Environment variable (recommended)
+export AGENT_TAYLOR_LOG_BUNDLE=~/Documents/agent-logs
+
+# Or CLI flag
+agent-taylor compare --author "Your Name" --log-bundle ~/Documents/agent-logs
+
+# Or config file (~/.config/agent-taylor/paths.toml)
+log_bundle = "~/Documents/agent-logs"
+```
+
+Priority order: CLI flag > environment variable > config file.
+
+**Syncing local logs to the bundle:**
+
+```bash
+# After a work session, sync local logs to the bundle
+agent-taylor sync
+
+# With explicit machine name
+agent-taylor sync --machine-name laptop
+
+# With explicit bundle path
+agent-taylor sync --bundle ~/Documents/agent-logs
+```
+
+The sync command copies `~/.claude` and `~/.codex` to `<bundle>/<hostname>/claude` and `<bundle>/<hostname>/codex`.
+
+**Running compare with a bundle:**
+
+```bash
+# With env var set, just run compare as usual
+agent-taylor compare --author "Your Name"
+```
+
+The tool automatically discovers all machines in the bundle and aggregates their logs as if all work happened on one machine.
