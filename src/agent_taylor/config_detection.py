@@ -1,11 +1,17 @@
 # ABOUTME: Configuration detection for beads and beadhub adoption.
-# ABOUTME: Detects beads adoption via git, beadhub via repo naming convention.
+# ABOUTME: Detects beads adoption via git, beadhub via .beadhub file presence.
 
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+# Date when the main beadhub project started using beadhub
+BEADHUB_START_DATE = "2025-11-30"
+# Projects with .beadhub file started using it 2 weeks after beadhub started
+BEADHUB_ADOPTION_DELAY_DAYS = 14
 
 
 def detect_beads_date(repo: Path) -> Optional[str]:
@@ -42,31 +48,47 @@ def detect_beads_date(repo: Path) -> Optional[str]:
         return None
 
 
-def is_beadhub_repo(repo: Path) -> bool:
-    """Check if a repo is the main beadhub repo.
+def detect_beadhub_date(repo: Path) -> Optional[str]:
+    """Detect when a repo started using beadhub.
 
-    Only the main beadhub repo uses beadhub for productivity tracking.
-    Other repos (beadhub-cloud, beadhub-bob, etc.) use beads but not beadhub.
+    - Main beadhub repo: uses beadhub from BEADHUB_START_DATE
+    - Repos with .beadhub file: uses beadhub from 2 weeks after BEADHUB_START_DATE
+    - Other repos: don't use beadhub
 
     Args:
         repo: Path to the git repository root.
 
     Returns:
-        True if the repo name is exactly "beadhub".
+        Date string (YYYY-MM-DD) when beadhub adoption started, or None.
     """
-    return repo.name == "beadhub"
+    if not repo.exists():
+        return None
+
+    # Main beadhub repo uses beadhub from the start
+    if repo.name == "beadhub":
+        return BEADHUB_START_DATE
+
+    # Check for .beadhub file (not directory)
+    beadhub_file = repo / ".beadhub"
+    if beadhub_file.is_file():
+        # Adoption date is 2 weeks after beadhub started
+        start = datetime.strptime(BEADHUB_START_DATE, "%Y-%m-%d")
+        adoption = start + timedelta(days=BEADHUB_ADOPTION_DELAY_DAYS)
+        return adoption.strftime("%Y-%m-%d")
+
+    return None
 
 
 def get_configuration(
     beads_date: Optional[str],
-    is_beadhub: bool,
+    beadhub_date: Optional[str],
     check_date: str,
 ) -> str:
     """Determine the configuration for a given date.
 
     Args:
         beads_date: Date when beads was adopted (YYYY-MM-DD), or None.
-        is_beadhub: Whether this is a beadhub repo (name starts with beadhub-).
+        beadhub_date: Date when beadhub was adopted (YYYY-MM-DD), or None.
         check_date: Date to check configuration for (YYYY-MM-DD).
 
     Returns:
@@ -76,8 +98,8 @@ def get_configuration(
     if beads_date is None or check_date < beads_date:
         return "none"
 
-    # Beadhub repos are always "beads+beadhub" once beads is adopted
-    if is_beadhub:
+    # If beadhub adopted and check_date is on or after beadhub adoption
+    if beadhub_date is not None and check_date >= beadhub_date:
         return "beads+beadhub"
 
     return "beads"

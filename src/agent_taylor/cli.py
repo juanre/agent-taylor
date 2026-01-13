@@ -31,7 +31,7 @@ from .compare import (
 )
 from .config_detection import (
     detect_beads_date,
-    is_beadhub_repo,
+    detect_beadhub_date,
 )
 from .repo_detection import (
     collect_repos_from_interactions,
@@ -43,7 +43,7 @@ class RepoConfig(TypedDict):
     """Configuration state for a repository."""
 
     beads_date: Optional[str]
-    is_beadhub: bool
+    beadhub_date: Optional[str]
 
 
 def _output_graph(daily: list, output_path: Path) -> None:
@@ -225,23 +225,23 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             repo_name = Path(repo_root).name
             print(f"  - {repo_name} ({repo_root})")
 
-    # Get beads adoption date and beadhub status for each repo
+    # Get beads and beadhub adoption dates for each repo
     repo_configs: dict[str, RepoConfig] = {}
     for repo_root in repos:
         repo_path = Path(repo_root)
         beads_date = detect_beads_date(repo_path)
-        is_beadhub = is_beadhub_repo(repo_path)
+        beadhub_date = detect_beadhub_date(repo_path)
         repo_configs[repo_root] = RepoConfig(
             beads_date=beads_date,
-            is_beadhub=is_beadhub,
+            beadhub_date=beadhub_date,
         )
-        if ns.verbose and (beads_date or is_beadhub):
+        if ns.verbose and (beads_date or beadhub_date):
             repo_name = repo_path.name
             info = []
             if beads_date:
                 info.append(f"beads: {beads_date}")
-            if is_beadhub:
-                info.append("beadhub repo")
+            if beadhub_date:
+                info.append(f"beadhub: {beadhub_date}")
             print(f"  {repo_name}: {', '.join(info)}")
 
     # Detect sessions from interactions
@@ -313,13 +313,13 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             continue
 
         # Skip beadhub sessions before --beadhub-since date
-        if ns.beadhub_since and repo_config["is_beadhub"] and session_date < ns.beadhub_since:
+        if ns.beadhub_since and repo_config["beadhub_date"] and session_date < ns.beadhub_since:
             continue
 
         configuration = classify_session(
             session_start_date=session_date,
             beads_date=repo_config["beads_date"],
-            is_beadhub=repo_config["is_beadhub"],
+            beadhub_date=repo_config["beadhub_date"],
         )
 
         # Get commits during this session
@@ -409,8 +409,8 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             if path and path in repo_configs:
                 cfg = repo_configs[path]
                 beads_date = cfg["beads_date"] or ""
-                is_beadhub = cfg["is_beadhub"]
-                if is_beadhub:
+                beadhub_date = cfg["beadhub_date"] or ""
+                if beadhub_date:
                     bucket = "beads+beadhub"
                 elif beads_date:
                     bucket = "beads"
@@ -419,18 +419,18 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             else:
                 bucket = "unmatched"
                 beads_date = ""
-                is_beadhub = False
+                beadhub_date = ""
             rows.append({
                 "project": project,
                 "sessions": count,
                 "bucket": bucket,
                 "beads_date": beads_date,
-                "is_beadhub": is_beadhub,
+                "beadhub_date": beadhub_date,
                 "path": path,
             })
         with open(ns.projects_csv, "w", newline="") as f:
             writer = csv.DictWriter(
-                f, fieldnames=["project", "sessions", "bucket", "beads_date", "is_beadhub", "path"]
+                f, fieldnames=["project", "sessions", "bucket", "beads_date", "beadhub_date", "path"]
             )
             writer.writeheader()
             writer.writerows(rows)

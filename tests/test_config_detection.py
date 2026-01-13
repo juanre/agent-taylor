@@ -58,44 +58,57 @@ class TestDetectBeadsDate:
         assert result is None
 
 
-class TestIsBeadhubRepo:
-    """Tests for is_beadhub_repo function."""
+class TestDetectBeadhubDate:
+    """Tests for detect_beadhub_date function."""
 
-    def test_returns_false_for_beadhub_prefix(self, tmp_path: Path) -> None:
-        """is_beadhub_repo returns False for repos starting with beadhub-."""
-        from agent_taylor.config_detection import is_beadhub_repo
-
-        repo = tmp_path / "beadhub-frontend"
-        repo.mkdir()
-
-        assert is_beadhub_repo(repo) is False
-
-    def test_returns_false_for_non_beadhub_repo(self, tmp_path: Path) -> None:
-        """is_beadhub_repo returns False for repos not starting with beadhub-."""
-        from agent_taylor.config_detection import is_beadhub_repo
+    def test_returns_none_for_non_beadhub_repo(self, tmp_path: Path) -> None:
+        """detect_beadhub_date returns None for repos without .beadhub file."""
+        from agent_taylor.config_detection import detect_beadhub_date
 
         repo = tmp_path / "my-project"
         repo.mkdir()
 
-        assert is_beadhub_repo(repo) is False
+        assert detect_beadhub_date(repo) is None
 
-    def test_returns_true_for_beadhub_exact(self, tmp_path: Path) -> None:
-        """is_beadhub_repo returns True for the main 'beadhub' repo."""
-        from agent_taylor.config_detection import is_beadhub_repo
+    def test_returns_start_date_for_main_beadhub(self, tmp_path: Path) -> None:
+        """detect_beadhub_date returns BEADHUB_START_DATE for main beadhub repo."""
+        from agent_taylor.config_detection import detect_beadhub_date, BEADHUB_START_DATE
 
         repo = tmp_path / "beadhub"
         repo.mkdir()
 
-        assert is_beadhub_repo(repo) is True
+        assert detect_beadhub_date(repo) == BEADHUB_START_DATE
 
-    def test_returns_false_for_beadhub_api(self, tmp_path: Path) -> None:
-        """is_beadhub_repo returns False for beadhub-api (not main beadhub)."""
-        from agent_taylor.config_detection import is_beadhub_repo
+    def test_returns_none_for_beadhub_prefix_without_file(self, tmp_path: Path) -> None:
+        """detect_beadhub_date returns None for beadhub-* repos without .beadhub file."""
+        from agent_taylor.config_detection import detect_beadhub_date
 
-        repo = tmp_path / "beadhub-api"
+        repo = tmp_path / "beadhub-cloud"
         repo.mkdir()
 
-        assert is_beadhub_repo(repo) is False
+        assert detect_beadhub_date(repo) is None
+
+    def test_returns_adoption_date_for_repo_with_beadhub_file(self, tmp_path: Path) -> None:
+        """detect_beadhub_date returns delayed adoption date for repos with .beadhub file."""
+        from agent_taylor.config_detection import detect_beadhub_date
+
+        repo = tmp_path / "my-project"
+        repo.mkdir()
+        (repo / ".beadhub").write_text("")  # Create .beadhub file
+
+        result = detect_beadhub_date(repo)
+        # Should be 2 weeks after BEADHUB_START_DATE (2025-11-30 + 14 days = 2025-12-14)
+        assert result == "2025-12-14"
+
+    def test_ignores_beadhub_directory(self, tmp_path: Path) -> None:
+        """detect_beadhub_date ignores .beadhub directory (only checks file)."""
+        from agent_taylor.config_detection import detect_beadhub_date
+
+        repo = tmp_path / "my-project"
+        repo.mkdir()
+        (repo / ".beadhub").mkdir()  # Create .beadhub directory, not file
+
+        assert detect_beadhub_date(repo) is None
 
 
 class TestGetConfiguration:
@@ -107,7 +120,7 @@ class TestGetConfiguration:
 
         result = get_configuration(
             beads_date=None,
-            is_beadhub=False,
+            beadhub_date=None,
             check_date="2025-06-15",
         )
 
@@ -119,7 +132,7 @@ class TestGetConfiguration:
 
         result = get_configuration(
             beads_date="2025-06-01",
-            is_beadhub=False,
+            beadhub_date=None,
             check_date="2025-05-15",
         )
 
@@ -131,7 +144,7 @@ class TestGetConfiguration:
 
         result = get_configuration(
             beads_date="2025-06-01",
-            is_beadhub=False,
+            beadhub_date=None,
             check_date="2025-06-15",
         )
 
@@ -143,32 +156,43 @@ class TestGetConfiguration:
 
         result = get_configuration(
             beads_date="2025-06-01",
-            is_beadhub=False,
+            beadhub_date=None,
             check_date="2025-06-01",
         )
 
         assert result == "beads"
 
-    def test_returns_beads_beadhub_for_beadhub_repo(self) -> None:
-        """get_configuration returns 'beads+beadhub' for beadhub repos."""
+    def test_returns_beads_beadhub_after_beadhub_adoption(self) -> None:
+        """get_configuration returns 'beads+beadhub' after beadhub adoption date."""
         from agent_taylor.config_detection import get_configuration
 
         result = get_configuration(
             beads_date="2025-06-01",
-            is_beadhub=True,
+            beadhub_date="2025-07-01",
             check_date="2025-07-15",
         )
 
         assert result == "beads+beadhub"
 
-    def test_returns_none_for_beadhub_repo_before_beads(self) -> None:
-        """get_configuration returns 'none' for beadhub repo before beads adoption."""
+    def test_returns_beads_before_beadhub_adoption(self) -> None:
+        """get_configuration returns 'beads' before beadhub adoption date."""
         from agent_taylor.config_detection import get_configuration
 
-        # Even if it's a beadhub repo, before beads adoption it's "none"
         result = get_configuration(
             beads_date="2025-06-01",
-            is_beadhub=True,
+            beadhub_date="2025-07-01",
+            check_date="2025-06-15",
+        )
+
+        assert result == "beads"
+
+    def test_returns_none_before_beads_even_with_beadhub(self) -> None:
+        """get_configuration returns 'none' before beads even if beadhub is set."""
+        from agent_taylor.config_detection import get_configuration
+
+        result = get_configuration(
+            beads_date="2025-06-01",
+            beadhub_date="2025-07-01",
             check_date="2025-05-15",
         )
 

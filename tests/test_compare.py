@@ -111,11 +111,11 @@ class TestClassifySession:
         """classify_session returns correct configuration for session."""
         from agent_taylor.compare import classify_session
 
-        # Session in June, beads adopted in May, not a beadhub repo
+        # Session in June, beads adopted in May, no beadhub
         result = classify_session(
             session_start_date="2025-06-15",
             beads_date="2025-05-01",
-            is_beadhub=False,
+            beadhub_date=None,
         )
 
         assert result == "beads"
@@ -127,19 +127,19 @@ class TestClassifySession:
         result = classify_session(
             session_start_date="2025-04-15",
             beads_date="2025-05-01",
-            is_beadhub=False,
+            beadhub_date=None,
         )
 
         assert result == "none"
 
-    def test_classifies_session_with_beadhub_repo(self) -> None:
-        """classify_session returns 'beads+beadhub' for beadhub repos."""
+    def test_classifies_session_with_beadhub(self) -> None:
+        """classify_session returns 'beads+beadhub' after beadhub adoption."""
         from agent_taylor.compare import classify_session
 
         result = classify_session(
             session_start_date="2025-10-15",
             beads_date="2025-05-01",
-            is_beadhub=True,
+            beadhub_date="2025-06-01",
         )
 
         assert result == "beads+beadhub"

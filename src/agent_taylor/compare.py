@@ -153,19 +153,19 @@ def _parse_git_log_numstat(output: str) -> list[CommitInfo]:
 def classify_session(
     session_start_date: str,
     beads_date: Optional[str],
-    is_beadhub: bool,
+    beadhub_date: Optional[str],
 ) -> str:
     """Classify a session into a configuration bucket.
 
     Args:
         session_start_date: Date of session start (YYYY-MM-DD).
         beads_date: Date beads was adopted (YYYY-MM-DD), or None.
-        is_beadhub: Whether this is a beadhub repo (name starts with beadhub-).
+        beadhub_date: Date beadhub was adopted (YYYY-MM-DD), or None.
 
     Returns:
         One of: "none", "beads", "beads+beadhub"
     """
-    return get_configuration(beads_date, is_beadhub, session_start_date)
+    return get_configuration(beads_date, beadhub_date, session_start_date)
 
 
 def aggregate_by_configuration(
