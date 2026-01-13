@@ -262,6 +262,10 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     skipped_no_coverage = 0
 
     for session in sessions:
+        # Skip ignored projects
+        if session.project in config.ignore_projects:
+            continue
+
         # Find the repo root for this session's project
         if session.project not in repo_by_name:
             skipped_no_repo += 1

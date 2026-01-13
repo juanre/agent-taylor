@@ -19,6 +19,7 @@ class PathConfig:
 
     remap: dict[str, str] = field(default_factory=dict)
     ignore: set[str] = field(default_factory=set)
+    ignore_projects: set[str] = field(default_factory=set)
     log_bundle: Optional[Path] = None
 
 
@@ -52,6 +53,7 @@ def load_path_config(config_path: Optional[Path] = None) -> PathConfig:
 
     remap = data.get("remap", {})
     ignore_list = data.get("ignore", {}).get("paths", [])
+    ignore_projects_list = data.get("ignore", {}).get("projects", [])
 
     log_bundle_raw = data.get("log_bundle")
     if log_bundle_raw is not None and not isinstance(log_bundle_raw, str):
@@ -61,6 +63,7 @@ def load_path_config(config_path: Optional[Path] = None) -> PathConfig:
     return PathConfig(
         remap=dict(remap),
         ignore=set(ignore_list),
+        ignore_projects=set(ignore_projects_list),
         log_bundle=log_bundle,
     )
 
