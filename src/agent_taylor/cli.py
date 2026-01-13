@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import sys
 from datetime import datetime
@@ -261,6 +262,10 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     skipped_no_repo = 0
     skipped_no_coverage = 0
 
+    # Track project data for --projects-csv
+    project_sessions: dict[str, int] = {}
+    project_paths: dict[str, str] = {}
+
     for session in sessions:
         # Skip ignored projects
         if session.project in config.ignore_projects:
@@ -274,13 +279,18 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         else:
             project = config.project_remap.get(session.project, session.project)
 
+        # Track project session count
+        project_sessions[project] = project_sessions.get(project, 0) + 1
+
         # Find the repo root for this session's project
         if project in repo_by_name:
             repo_root = repo_by_name[project]
+            project_paths[project] = repo_root
         elif project.startswith("beadhub-") and "beadhub" in repo_by_name:
             # Worktrees of beadhub - map to main repo for time tracking
             # (commits are already in the main repo)
             repo_root = repo_by_name["beadhub"]
+            project_paths[project] = repo_root
         else:
             skipped_no_repo += 1
             continue
@@ -390,6 +400,41 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
                     f"{cfg['commits']:>8} {cfg['delta']:>10} "
                     f"{cfg['delta_per_hour']:>10.1f} {cfg['commits_per_hour']:>10.2f}"
                 )
+
+    # Output projects CSV if requested
+    if ns.projects_csv:
+        rows = []
+        for project, count in sorted(project_sessions.items(), key=lambda x: -x[1]):
+            path = project_paths.get(project, "")
+            if path and path in repo_configs:
+                cfg = repo_configs[path]
+                beads_date = cfg["beads_date"] or ""
+                is_beadhub = cfg["is_beadhub"]
+                if is_beadhub:
+                    bucket = "beads+beadhub"
+                elif beads_date:
+                    bucket = "beads"
+                else:
+                    bucket = "none"
+            else:
+                bucket = "unmatched"
+                beads_date = ""
+                is_beadhub = False
+            rows.append({
+                "project": project,
+                "sessions": count,
+                "bucket": bucket,
+                "beads_date": beads_date,
+                "is_beadhub": is_beadhub,
+                "path": path,
+            })
+        with open(ns.projects_csv, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["project", "sessions", "bucket", "beads_date", "is_beadhub", "path"]
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"Wrote {len(rows)} projects to {ns.projects_csv}")
 
     return 0
 
@@ -534,6 +579,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--graph",
         default=None,
         help="Output productivity graph to file (PNG). Implies --history --combined.",
+    )
+    compare.add_argument(
+        "--projects-csv",
+        default=None,
+        help="Output project classification data to CSV file.",
     )
     compare.set_defaults(func=_cmd_compare)
 
