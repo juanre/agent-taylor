@@ -45,6 +45,50 @@ class RepoConfig(TypedDict):
     is_beadhub: bool
 
 
+def _output_graph(daily: list, output_path: Path) -> None:
+    """Generate productivity graph from daily metrics.
+
+    Args:
+        daily: List of DateMetrics dicts (already filtered to days with commits).
+        output_path: Path to save the PNG file.
+    """
+    import matplotlib.pyplot as plt
+
+    dates = [d["date"] for d in daily]
+    delta_per_hour = [d["delta_per_hour"] for d in daily]
+    commits_per_hour = [d["commits_per_hour"] for d in daily]
+
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # X-axis: sequential index (no gaps)
+    x = range(len(dates))
+
+    # Primary y-axis: delta/hr
+    color1 = "#2563eb"
+    ax1.set_xlabel("Date")
+    ax1.set_ylabel("delta/hr", color=color1)
+    ax1.bar(x, delta_per_hour, color=color1, alpha=0.7, label="delta/hr")
+    ax1.tick_params(axis="y", labelcolor=color1)
+
+    # Secondary y-axis: commits/hr
+    ax2 = ax1.twinx()
+    color2 = "#dc2626"
+    ax2.set_ylabel("commits/hr", color=color2)
+    ax2.plot(x, commits_per_hour, color=color2, marker="o", linewidth=2, label="commits/hr")
+    ax2.tick_params(axis="y", labelcolor=color2)
+
+    # X-axis labels (dates)
+    ax1.set_xticks(list(x))
+    ax1.set_xticklabels(dates, rotation=45, ha="right", fontsize=8)
+
+    # Title
+    plt.title("Productivity Over Time")
+
+    fig.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+
 def _version() -> str:
     try:
         return metadata.version("agent-taylor")
@@ -278,6 +322,18 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         print("No sessions matched the criteria.", file=sys.stderr)
         return 1
 
+    # Handle --graph (implies --history --combined)
+    if ns.graph:
+        daily = aggregate_by_date(session_metrics)
+        # Filter out days with no commits (no progress)
+        daily = [d for d in daily if d["commits"] > 0]
+        if not daily:
+            print("No days with commits to graph.", file=sys.stderr)
+            return 1
+        _output_graph(daily, Path(ns.graph).expanduser())
+        print(f"Graph saved to {ns.graph}")
+        return 0
+
     # Print results
     print()
 
@@ -456,6 +512,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--combined",
         action="store_true",
         help="With --history, combine all configurations into single daily totals.",
+    )
+    compare.add_argument(
+        "--graph",
+        default=None,
+        help="Output productivity graph to file (PNG). Implies --history --combined.",
     )
     compare.set_defaults(func=_cmd_compare)
 

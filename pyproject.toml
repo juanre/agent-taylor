@@ -7,7 +7,9 @@ authors = [
     { name = "Juan Reyero", email = "juan@juanreyero.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "matplotlib>=3.10.8",
+]
 
 [project.scripts]
 agent-taylor = "agent_taylor.cli:main"
