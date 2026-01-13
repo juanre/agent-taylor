@@ -43,21 +43,18 @@ def detect_beads_date(repo: Path) -> Optional[str]:
 
 
 def is_beadhub_repo(repo: Path) -> bool:
-    """Check if a repo is a beadhub repo based on its name.
+    """Check if a repo is the main beadhub repo.
 
-    Beadhub repos are identified by the name "beadhub" or names starting with
-    "beadhub-". These repos are assumed to always use beadhub (the .beadhub/
-    directory is frequently deleted and recreated, so filesystem detection
-    is unreliable).
+    Only the main beadhub repo uses beadhub for productivity tracking.
+    Other repos (beadhub-cloud, beadhub-bob, etc.) use beads but not beadhub.
 
     Args:
         repo: Path to the git repository root.
 
     Returns:
-        True if the repo name is "beadhub" or starts with "beadhub-".
+        True if the repo name is exactly "beadhub".
     """
-    name = repo.name
-    return name == "beadhub" or name.startswith("beadhub-")
+    return repo.name == "beadhub"
 
 
 def get_configuration(

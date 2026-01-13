@@ -61,14 +61,14 @@ class TestDetectBeadsDate:
 class TestIsBeadhubRepo:
     """Tests for is_beadhub_repo function."""
 
-    def test_returns_true_for_beadhub_prefix(self, tmp_path: Path) -> None:
-        """is_beadhub_repo returns True for repos starting with beadhub-."""
+    def test_returns_false_for_beadhub_prefix(self, tmp_path: Path) -> None:
+        """is_beadhub_repo returns False for repos starting with beadhub-."""
         from agent_taylor.config_detection import is_beadhub_repo
 
         repo = tmp_path / "beadhub-frontend"
         repo.mkdir()
 
-        assert is_beadhub_repo(repo) is True
+        assert is_beadhub_repo(repo) is False
 
     def test_returns_false_for_non_beadhub_repo(self, tmp_path: Path) -> None:
         """is_beadhub_repo returns False for repos not starting with beadhub-."""
@@ -88,14 +88,14 @@ class TestIsBeadhubRepo:
 
         assert is_beadhub_repo(repo) is True
 
-    def test_returns_true_for_beadhub_api(self, tmp_path: Path) -> None:
-        """is_beadhub_repo returns True for beadhub-api."""
+    def test_returns_false_for_beadhub_api(self, tmp_path: Path) -> None:
+        """is_beadhub_repo returns False for beadhub-api (not main beadhub)."""
         from agent_taylor.config_detection import is_beadhub_repo
 
         repo = tmp_path / "beadhub-api"
         repo.mkdir()
 
-        assert is_beadhub_repo(repo) is True
+        assert is_beadhub_repo(repo) is False
 
 
 class TestGetConfiguration:
