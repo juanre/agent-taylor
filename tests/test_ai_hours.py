@@ -464,3 +464,635 @@ class TestDetectSourceDateRangesWithBundle:
 
         # Should be bundle date (2026-01-10), not the ignored earlier date
         assert result["claude"] == "2026-01-10"
+
+
+class TestMergeCoverageWindows:
+    """Tests for merge_coverage_windows function."""
+
+    def test_empty_list_returns_empty(self) -> None:
+        """merge_coverage_windows returns empty list for empty input."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([])
+
+        assert result == []
+
+    def test_single_window_returned_unchanged(self) -> None:
+        """merge_coverage_windows returns single window unchanged."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([("2025-01-01", "2025-01-31")])
+
+        assert result == [("2025-01-01", "2025-01-31")]
+
+    def test_non_overlapping_windows_preserved(self) -> None:
+        """merge_coverage_windows preserves non-overlapping windows."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ])
+
+        assert result == [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ]
+
+    def test_overlapping_windows_merged(self) -> None:
+        """merge_coverage_windows merges overlapping windows."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-02-15"),
+            ("2025-02-01", "2025-03-15"),
+        ])
+
+        assert result == [("2025-01-01", "2025-03-15")]
+
+    def test_adjacent_windows_merged(self) -> None:
+        """merge_coverage_windows merges adjacent windows (end meets start)."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-01-31"),
+            ("2025-02-01", "2025-02-28"),
+        ])
+
+        # Adjacent windows should be merged (no gap between them)
+        assert result == [("2025-01-01", "2025-02-28")]
+
+    def test_unsorted_input_produces_sorted_output(self) -> None:
+        """merge_coverage_windows sorts input before merging."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-06-01", "2025-06-30"),
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ])
+
+        assert result == [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+            ("2025-06-01", "2025-06-30"),
+        ]
+
+    def test_multiple_overlapping_windows(self) -> None:
+        """merge_coverage_windows handles multiple overlapping windows."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-02-15"),
+            ("2025-02-10", "2025-03-20"),
+            ("2025-03-15", "2025-04-30"),
+        ])
+
+        # All three overlap, should merge into one
+        assert result == [("2025-01-01", "2025-04-30")]
+
+    def test_mixed_overlapping_and_separate(self) -> None:
+        """merge_coverage_windows handles mix of overlapping and separate windows."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-02-15"),  # Group 1
+            ("2025-02-10", "2025-03-15"),  # Group 1 (overlaps)
+            ("2025-06-01", "2025-07-15"),  # Group 2 (separate)
+            ("2025-07-01", "2025-08-15"),  # Group 2 (overlaps)
+        ])
+
+        assert result == [
+            ("2025-01-01", "2025-03-15"),
+            ("2025-06-01", "2025-08-15"),
+        ]
+
+    def test_contained_window_absorbed(self) -> None:
+        """merge_coverage_windows absorbs window fully contained in another."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-12-31"),
+            ("2025-03-01", "2025-04-30"),  # Fully contained
+        ])
+
+        assert result == [("2025-01-01", "2025-12-31")]
+
+    def test_one_day_gap_not_merged(self) -> None:
+        """merge_coverage_windows does NOT merge windows with a 1-day gap."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        # Jan 31 to Feb 2 - Feb 1 is missing (1-day gap)
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-01-31"),
+            ("2025-02-02", "2025-02-28"),
+        ])
+
+        # Should stay separate because Feb 1 is not covered
+        assert result == [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-02-02", "2025-02-28"),
+        ]
+
+    def test_single_day_windows(self) -> None:
+        """merge_coverage_windows handles single-day windows."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-01-01"),
+            ("2025-01-02", "2025-01-02"),
+            ("2025-01-03", "2025-01-03"),
+        ])
+
+        # All consecutive days should merge
+        assert result == [("2025-01-01", "2025-01-03")]
+
+    def test_single_day_with_gap(self) -> None:
+        """merge_coverage_windows keeps single-day windows separate if gap exists."""
+        from agent_taylor.ai_hours import merge_coverage_windows
+
+        result = merge_coverage_windows([
+            ("2025-01-01", "2025-01-01"),
+            ("2025-01-03", "2025-01-03"),  # Jan 2 missing
+        ])
+
+        assert result == [
+            ("2025-01-01", "2025-01-01"),
+            ("2025-01-03", "2025-01-03"),
+        ]
+
+
+class TestIsDateCovered:
+    """Tests for is_date_covered function."""
+
+    def test_empty_windows_returns_false(self) -> None:
+        """is_date_covered returns False for empty windows."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        result = is_date_covered("2025-01-15", [])
+
+        assert result is False
+
+    def test_date_within_window(self) -> None:
+        """is_date_covered returns True for date within a window."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        result = is_date_covered("2025-01-15", [("2025-01-01", "2025-01-31")])
+
+        assert result is True
+
+    def test_date_outside_window(self) -> None:
+        """is_date_covered returns False for date outside all windows."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        result = is_date_covered("2025-03-15", [("2025-01-01", "2025-01-31")])
+
+        assert result is False
+
+    def test_date_on_start_boundary(self) -> None:
+        """is_date_covered returns True for date on window start boundary."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        result = is_date_covered("2025-01-01", [("2025-01-01", "2025-01-31")])
+
+        assert result is True
+
+    def test_date_on_end_boundary(self) -> None:
+        """is_date_covered returns True for date on window end boundary."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        result = is_date_covered("2025-01-31", [("2025-01-01", "2025-01-31")])
+
+        assert result is True
+
+    def test_date_in_gap_between_windows(self) -> None:
+        """is_date_covered returns False for date in gap between windows."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        windows = [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ]
+        result = is_date_covered("2025-02-15", windows)
+
+        assert result is False
+
+    def test_date_before_all_windows(self) -> None:
+        """is_date_covered returns False for date before all windows."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        windows = [
+            ("2025-06-01", "2025-06-30"),
+            ("2025-08-01", "2025-08-31"),
+        ]
+        result = is_date_covered("2025-01-15", windows)
+
+        assert result is False
+
+    def test_date_after_all_windows(self) -> None:
+        """is_date_covered returns False for date after all windows."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        windows = [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ]
+        result = is_date_covered("2025-12-15", windows)
+
+        assert result is False
+
+    def test_date_in_second_window(self) -> None:
+        """is_date_covered returns True for date in second of multiple windows."""
+        from agent_taylor.ai_hours import is_date_covered
+
+        windows = [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ]
+        result = is_date_covered("2025-03-15", windows)
+
+        assert result is True
+
+
+class TestIntersectCoverageWindows:
+    """Tests for intersect_coverage_windows function."""
+
+    def test_empty_first_list_returns_empty(self) -> None:
+        """intersect_coverage_windows returns empty for empty first list."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows([], [("2025-01-01", "2025-01-31")])
+
+        assert result == []
+
+    def test_empty_second_list_returns_empty(self) -> None:
+        """intersect_coverage_windows returns empty for empty second list."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows([("2025-01-01", "2025-01-31")], [])
+
+        assert result == []
+
+    def test_no_overlap_returns_empty(self) -> None:
+        """intersect_coverage_windows returns empty when windows don't overlap."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows(
+            [("2025-01-01", "2025-01-31")],
+            [("2025-03-01", "2025-03-31")],
+        )
+
+        assert result == []
+
+    def test_partial_overlap(self) -> None:
+        """intersect_coverage_windows returns overlapping portion."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows(
+            [("2025-01-01", "2025-02-15")],
+            [("2025-02-01", "2025-03-15")],
+        )
+
+        # Overlap is Feb 1 - Feb 15
+        assert result == [("2025-02-01", "2025-02-15")]
+
+    def test_one_contained_in_other(self) -> None:
+        """intersect_coverage_windows returns contained window."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows(
+            [("2025-01-01", "2025-12-31")],
+            [("2025-03-01", "2025-04-30")],
+        )
+
+        assert result == [("2025-03-01", "2025-04-30")]
+
+    def test_identical_windows(self) -> None:
+        """intersect_coverage_windows returns same window for identical inputs."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows(
+            [("2025-01-01", "2025-01-31")],
+            [("2025-01-01", "2025-01-31")],
+        )
+
+        assert result == [("2025-01-01", "2025-01-31")]
+
+    def test_multiple_windows_with_gap(self) -> None:
+        """intersect_coverage_windows handles gap in one list."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        # First list has continuous coverage
+        # Second list has a gap in February
+        result = intersect_coverage_windows(
+            [("2025-01-01", "2025-03-31")],
+            [("2025-01-01", "2025-01-31"), ("2025-03-01", "2025-03-31")],
+        )
+
+        # Result should have the gap preserved
+        assert result == [
+            ("2025-01-01", "2025-01-31"),
+            ("2025-03-01", "2025-03-31"),
+        ]
+
+    def test_multiple_overlapping_intersections(self) -> None:
+        """intersect_coverage_windows handles multiple overlapping results."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        result = intersect_coverage_windows(
+            [("2025-01-01", "2025-02-28"), ("2025-04-01", "2025-05-31")],
+            [("2025-02-01", "2025-04-30")],
+        )
+
+        # Should get two intersections:
+        # Jan-Feb with Feb-Apr = Feb 1 - Feb 28
+        # Apr-May with Feb-Apr = Apr 1 - Apr 30
+        assert result == [
+            ("2025-02-01", "2025-02-28"),
+            ("2025-04-01", "2025-04-30"),
+        ]
+
+    def test_real_world_scenario_with_gap(self) -> None:
+        """intersect_coverage_windows handles Juan's scenario: Claude gap, Codex continuous."""
+        from agent_taylor.ai_hours import intersect_coverage_windows
+
+        # Claude has: old computer [A, B] and altair/antares [C, D] with gap [B, C]
+        claude_windows = [
+            ("2025-09-01", "2025-10-15"),  # Old computer
+            ("2025-12-01", "2026-01-15"),  # Altair/Antares
+        ]
+        # Codex has continuous coverage
+        codex_windows = [
+            ("2025-09-01", "2026-01-15"),
+        ]
+
+        result = intersect_coverage_windows(claude_windows, codex_windows)
+
+        # Should preserve the gap
+        assert result == [
+            ("2025-09-01", "2025-10-15"),
+            ("2025-12-01", "2026-01-15"),
+        ]
+
+
+class TestLatestClaudeTimestamp:
+    """Tests for _latest_claude_timestamp function."""
+
+    def test_empty_dir_returns_none(self, tmp_path: Path) -> None:
+        """_latest_claude_timestamp returns None for empty directory."""
+        from agent_taylor.ai_hours import _latest_claude_timestamp
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        result = _latest_claude_timestamp(claude_dir)
+
+        assert result is None
+
+    def test_finds_latest_timestamp(self, tmp_path: Path) -> None:
+        """_latest_claude_timestamp finds the latest timestamp from logs."""
+        from agent_taylor.ai_hours import _latest_claude_timestamp
+
+        claude_dir = tmp_path / ".claude"
+        projects_dir = claude_dir / "projects" / "-Users-test-prj"
+        projects_dir.mkdir(parents=True)
+
+        # Session with multiple messages
+        session_file = projects_dir / "session1.jsonl"
+        session_file.write_text(
+            json.dumps({
+                "type": "user",
+                "timestamp": "2025-01-01T10:00:00.000Z",
+                "cwd": "/Users/test/prj",
+            }) + "\n" +
+            json.dumps({
+                "type": "assistant",
+                "timestamp": "2025-06-15T14:30:00.000Z",  # Latest
+                "cwd": "/Users/test/prj",
+            }) + "\n" +
+            json.dumps({
+                "type": "user",
+                "timestamp": "2025-03-20T09:00:00.000Z",
+                "cwd": "/Users/test/prj",
+            }) + "\n"
+        )
+
+        result = _latest_claude_timestamp(claude_dir)
+
+        # Should find June 15, 2025 14:30 UTC
+        assert result is not None
+        result_date = datetime.fromtimestamp(result).strftime("%Y-%m-%d")
+        assert result_date == "2025-06-15"
+
+    def test_finds_latest_across_sessions(self, tmp_path: Path) -> None:
+        """_latest_claude_timestamp finds latest across multiple session files."""
+        from agent_taylor.ai_hours import _latest_claude_timestamp
+
+        claude_dir = tmp_path / ".claude"
+        projects_dir = claude_dir / "projects" / "-Users-test-prj"
+        projects_dir.mkdir(parents=True)
+
+        # First session - older
+        (projects_dir / "session1.jsonl").write_text(
+            json.dumps({
+                "type": "user",
+                "timestamp": "2025-01-01T10:00:00.000Z",
+                "cwd": "/Users/test/prj",
+            }) + "\n"
+        )
+
+        # Second session - newer (use midday to avoid timezone edge cases)
+        (projects_dir / "session2.jsonl").write_text(
+            json.dumps({
+                "type": "assistant",
+                "timestamp": "2025-12-31T12:00:00.000Z",
+                "cwd": "/Users/test/prj",
+            }) + "\n"
+        )
+
+        result = _latest_claude_timestamp(claude_dir)
+
+        assert result is not None
+        # Use UTC to avoid timezone issues
+        from datetime import timezone
+        result_date = datetime.fromtimestamp(result, timezone.utc).strftime("%Y-%m-%d")
+        assert result_date == "2025-12-31"
+
+
+class TestLatestCodexTimestamp:
+    """Tests for _latest_codex_timestamp function."""
+
+    def test_empty_dir_returns_none(self, tmp_path: Path) -> None:
+        """_latest_codex_timestamp returns None for empty directory."""
+        from agent_taylor.ai_hours import _latest_codex_timestamp
+
+        codex_dir = tmp_path / ".codex"
+        codex_dir.mkdir()
+
+        result = _latest_codex_timestamp(codex_dir)
+
+        assert result is None
+
+    def test_finds_latest_timestamp(self, tmp_path: Path) -> None:
+        """_latest_codex_timestamp finds the latest timestamp from logs."""
+        from agent_taylor.ai_hours import _latest_codex_timestamp
+
+        codex_dir = tmp_path / ".codex"
+        sessions_dir = codex_dir / "sessions" / "2025" / "06" / "15"
+        sessions_dir.mkdir(parents=True)
+
+        session_file = sessions_dir / "session1.jsonl"
+        session_file.write_text(
+            json.dumps({"type": "session_meta", "payload": {"cwd": "/Users/test/prj"}})
+            + "\n" +
+            json.dumps({
+                "type": "response_item",
+                "timestamp": "2025-06-15T14:30:00.000Z",
+                "payload": {"type": "message", "role": "user"},
+            })
+            + "\n"
+        )
+
+        result = _latest_codex_timestamp(codex_dir)
+
+        assert result is not None
+        result_date = datetime.fromtimestamp(result).strftime("%Y-%m-%d")
+        assert result_date == "2025-06-15"
+
+
+class TestDetectCoverageWindows:
+    """Tests for detect_coverage_windows function."""
+
+    def test_empty_dirs_return_empty_windows(self, tmp_path: Path) -> None:
+        """detect_coverage_windows returns empty windows for empty dirs."""
+        from agent_taylor.ai_hours import detect_coverage_windows
+
+        claude_dir = tmp_path / ".claude"
+        codex_dir = tmp_path / ".codex"
+        claude_dir.mkdir()
+        codex_dir.mkdir()
+
+        result = detect_coverage_windows(claude_dir=claude_dir, codex_dir=codex_dir)
+
+        assert result["claude"] == []
+        assert result["codex"] == []
+
+    def test_single_claude_dir_returns_window(self, tmp_path: Path) -> None:
+        """detect_coverage_windows returns window for single Claude dir."""
+        from agent_taylor.ai_hours import detect_coverage_windows
+
+        claude_dir = tmp_path / ".claude"
+        projects_dir = claude_dir / "projects" / "-Users-test-prj"
+        projects_dir.mkdir(parents=True)
+
+        # Write sessions spanning Jan to June
+        (projects_dir / "session1.jsonl").write_text(
+            json.dumps({
+                "type": "user",
+                "timestamp": "2025-01-15T10:00:00.000Z",
+                "cwd": "/Users/test/prj",
+            }) + "\n"
+        )
+        (projects_dir / "session2.jsonl").write_text(
+            json.dumps({
+                "type": "assistant",
+                "timestamp": "2025-06-20T14:00:00.000Z",
+                "cwd": "/Users/test/prj",
+            }) + "\n"
+        )
+
+        codex_dir = tmp_path / ".codex"
+        codex_dir.mkdir()
+
+        result = detect_coverage_windows(claude_dir=claude_dir, codex_dir=codex_dir)
+
+        assert len(result["claude"]) == 1
+        assert result["claude"][0] == ("2025-01-15", "2025-06-20")
+        assert result["codex"] == []
+
+    def test_bundle_mode_returns_windows_per_machine(self, tmp_path: Path) -> None:
+        """detect_coverage_windows with bundle returns window per machine."""
+        from agent_taylor.ai_hours import detect_coverage_windows
+
+        bundle = tmp_path / "agent-logs"
+
+        # Old machine: Jan-Mar
+        old_claude = bundle / "old" / "claude" / "projects" / "-Users-test-prj"
+        old_claude.mkdir(parents=True)
+        (old_claude / "session.jsonl").write_text(
+            json.dumps({"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "cwd": "/test"}) + "\n" +
+            json.dumps({"type": "assistant", "timestamp": "2025-03-15T14:00:00.000Z", "cwd": "/test"}) + "\n"
+        )
+
+        # Altair: June-Dec (gap from Mar to June)
+        altair_claude = bundle / "altair" / "claude" / "projects" / "-Users-test-prj"
+        altair_claude.mkdir(parents=True)
+        (altair_claude / "session.jsonl").write_text(
+            json.dumps({"type": "user", "timestamp": "2025-06-01T10:00:00.000Z", "cwd": "/test"}) + "\n" +
+            json.dumps({"type": "assistant", "timestamp": "2025-12-15T14:00:00.000Z", "cwd": "/test"}) + "\n"
+        )
+
+        result = detect_coverage_windows(log_bundle=bundle)
+
+        # Should have two separate windows (the gap is preserved)
+        assert len(result["claude"]) == 2
+        windows_sorted = sorted(result["claude"])
+        assert windows_sorted[0] == ("2025-01-01", "2025-03-15")
+        assert windows_sorted[1] == ("2025-06-01", "2025-12-15")
+
+    def test_bundle_mode_overlapping_machines_not_merged_yet(self, tmp_path: Path) -> None:
+        """detect_coverage_windows returns raw windows without merging."""
+        from agent_taylor.ai_hours import detect_coverage_windows
+
+        bundle = tmp_path / "agent-logs"
+
+        # Altair: Jan-June
+        altair_claude = bundle / "altair" / "claude" / "projects" / "-Users-test-prj"
+        altair_claude.mkdir(parents=True)
+        (altair_claude / "session.jsonl").write_text(
+            json.dumps({"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "cwd": "/test"}) + "\n" +
+            json.dumps({"type": "assistant", "timestamp": "2025-06-30T14:00:00.000Z", "cwd": "/test"}) + "\n"
+        )
+
+        # Antares: May-Dec (overlaps with altair)
+        antares_claude = bundle / "antares" / "claude" / "projects" / "-Users-test-prj"
+        antares_claude.mkdir(parents=True)
+        (antares_claude / "session.jsonl").write_text(
+            json.dumps({"type": "user", "timestamp": "2025-05-01T10:00:00.000Z", "cwd": "/test"}) + "\n" +
+            json.dumps({"type": "assistant", "timestamp": "2025-12-15T14:00:00.000Z", "cwd": "/test"}) + "\n"
+        )
+
+        result = detect_coverage_windows(log_bundle=bundle)
+
+        # Should have two separate windows (not merged - that's done separately)
+        assert len(result["claude"]) == 2
+
+    def test_bundle_mode_with_codex(self, tmp_path: Path) -> None:
+        """detect_coverage_windows handles both Claude and Codex in bundle."""
+        from agent_taylor.ai_hours import detect_coverage_windows
+
+        bundle = tmp_path / "agent-logs"
+
+        # Altair with Claude
+        altair_claude = bundle / "altair" / "claude" / "projects" / "-Users-test-prj"
+        altair_claude.mkdir(parents=True)
+        (altair_claude / "session.jsonl").write_text(
+            json.dumps({"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "cwd": "/test"}) + "\n" +
+            json.dumps({"type": "assistant", "timestamp": "2025-06-30T14:00:00.000Z", "cwd": "/test"}) + "\n"
+        )
+
+        # Altair with Codex
+        altair_codex = bundle / "altair" / "codex" / "sessions" / "2025" / "01" / "01"
+        altair_codex.mkdir(parents=True)
+        (altair_codex / "session.jsonl").write_text(
+            json.dumps({"type": "session_meta", "payload": {"cwd": "/test"}}) + "\n" +
+            json.dumps({"type": "response_item", "timestamp": "2025-01-01T10:00:00.000Z", "payload": {"type": "message", "role": "user"}}) + "\n" +
+            json.dumps({"type": "response_item", "timestamp": "2025-12-31T14:00:00.000Z", "payload": {"type": "message", "role": "assistant"}}) + "\n"
+        )
+
+        result = detect_coverage_windows(log_bundle=bundle)
+
+        assert len(result["claude"]) == 1
+        assert result["claude"][0] == ("2025-01-01", "2025-06-30")
+        assert len(result["codex"]) == 1
+        assert result["codex"][0] == ("2025-01-01", "2025-12-31")

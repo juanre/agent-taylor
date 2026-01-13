@@ -22,13 +22,15 @@ uv run agent-taylor compare --author "Your Name" --verbose
 **How it works:**
 
 1. Parses AI conversation logs from Claude Code (`~/.claude/`) and Codex (`~/.codex/`)
-2. Detects the earliest date from each source and uses the later one as start date
-3. Extracts working directory paths from conversations to discover git repos
-4. For each work session, classifies it by configuration:
+2. Computes coverage windows for each source (earliest to latest timestamp per machine)
+3. Merges overlapping windows within each source, then intersects across sources
+4. Sessions outside coverage windows are skipped (handles gaps in log data)
+5. Extracts working directory paths from conversations to discover git repos
+6. For each work session, classifies it by configuration:
    - Checks if the repo has `.beads/` committed (beads adoption date)
    - Checks if the repo name is `beadhub` or starts with `beadhub-`
-5. Gets git commits that occurred during each session's time window
-6. Aggregates metrics by configuration
+7. Gets git commits that occurred during each session's time window
+8. Aggregates metrics by configuration
 
 **Why session-based measurement matters:**
 
@@ -37,16 +39,16 @@ Daily aggregation loses precision when you work on multiple projects concurrentl
 **Output:**
 
 ```
-claude_logs_start: 2025-12-09
-codex_logs_start: 2025-10-31
-effective_start_date: 2025-12-09
+claude_coverage: [('2025-09-01', '2025-10-15'), ('2025-12-01', '2026-01-15')]
+codex_coverage: [('2025-09-01', '2026-01-15')]
+effective_coverage: [('2025-09-01', '2025-10-15'), ('2025-12-01', '2026-01-15')]
 repos_detected: 10
   - beadhub (/Users/name/prj/beadhub)
   - llmring (/Users/name/prj/llmring)
   ...
   beadhub: beads: 2025-11-30, beadhub repo
 sessions_skipped_no_repo: 47
-sessions_skipped_before_start: 22
+sessions_skipped_no_coverage: 22
 
 configuration    sessions    hours  commits      delta   delta/hr commits/hr
 ----------------------------------------------------------------------------------
@@ -54,6 +56,8 @@ none                   13      2.0        3       2232     1114.5       1.50
 beads                  83     16.0       65      33378     2083.2       4.06
 beads+beadhub          39      5.3        9       8318     1567.7       1.70
 ```
+
+Note: If there's a gap in Claude logs (e.g., between machines), sessions during that gap are automatically excluded. The `effective_coverage` shows which time periods are analyzed.
 
 **Options:**
 
@@ -163,4 +167,4 @@ The sync command copies `~/.claude` and `~/.codex` to `<bundle>/<hostname>/claud
 agent-taylor compare --author "Your Name"
 ```
 
-The tool automatically discovers all machines in the bundle and aggregates their logs as if all work happened on one machine.
+The tool automatically discovers all machines in the bundle and aggregates their logs. It computes coverage windows per machine and handles gaps intelligently - if your "old" machine has Claude logs from Sept-Oct and your "new" machine has logs from Dec onwards, sessions from Oct-Dec (the gap) will be automatically excluded from analysis.

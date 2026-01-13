@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -406,6 +406,43 @@ def _earliest_claude_timestamp(claude_dir: Path) -> Optional[float]:
     return earliest
 
 
+def _latest_claude_timestamp(claude_dir: Path) -> Optional[float]:
+    """Find the latest timestamp from Claude Code logs."""
+    projects_dir = claude_dir / "projects"
+    if not projects_dir.exists():
+        return None
+
+    latest: Optional[float] = None
+
+    for project_dir in projects_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        for session_file in project_dir.glob("*.jsonl"):
+            try:
+                with session_file.open("r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            msg = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        msg_type = msg.get("type", "")
+                        if msg_type not in ("user", "assistant"):
+                            continue
+
+                        ts = _parse_timestamp_value(msg.get("timestamp"))
+                        if ts is not None:
+                            if latest is None or ts > latest:
+                                latest = ts
+            except (OSError, IOError):
+                continue
+
+    return latest
+
+
 def _earliest_codex_timestamp(codex_dir: Path) -> Optional[float]:
     """Find the earliest timestamp from Codex logs."""
     sessions_dir = codex_dir / "sessions"
@@ -449,6 +486,118 @@ def _earliest_codex_timestamp(codex_dir: Path) -> Optional[float]:
             continue
 
     return earliest
+
+
+def _latest_codex_timestamp(codex_dir: Path) -> Optional[float]:
+    """Find the latest timestamp from Codex logs."""
+    sessions_dir = codex_dir / "sessions"
+    if not sessions_dir.exists():
+        return None
+
+    latest: Optional[float] = None
+
+    for session_file in sessions_dir.rglob("*.jsonl"):
+        try:
+            with session_file.open("r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    msg_type = msg.get("type", "")
+                    payload = msg.get("payload", {})
+
+                    # Only count actual message types, not session_meta
+                    if msg_type == "response_item":
+                        payload_type = payload.get("type", "")
+                        if payload_type not in ("message", "function_call"):
+                            continue
+                    elif msg_type == "event_msg":
+                        payload_type = payload.get("type", "")
+                        if payload_type != "user_message":
+                            continue
+                    else:
+                        continue
+
+                    ts = _parse_timestamp_value(msg.get("timestamp"))
+                    if ts is not None:
+                        if latest is None or ts > latest:
+                            latest = ts
+        except (OSError, IOError):
+            continue
+
+    return latest
+
+
+def detect_coverage_windows(
+    log_bundle: Optional[Path] = None,
+    claude_dir: Optional[Path] = None,
+    codex_dir: Optional[Path] = None,
+) -> dict[str, list[tuple[str, str]]]:
+    """Detect coverage windows for each log source.
+
+    For each source (Claude, Codex), returns a list of (start_date, end_date)
+    tuples representing coverage windows. In bundle mode, each machine contributes
+    one window per source. The returned windows are NOT merged - caller should
+    use merge_coverage_windows() if merging is desired.
+
+    Args:
+        log_bundle: If provided, discover sources from bundle structure.
+            Bundle mode ignores claude_dir and codex_dir.
+        claude_dir: Single Claude directory (default mode only).
+        codex_dir: Single Codex directory (default mode only).
+
+    Returns:
+        Dict with 'claude' and 'codex' keys, each mapping to a list of
+        (start_date, end_date) tuples.
+    """
+    result: dict[str, list[tuple[str, str]]] = {"claude": [], "codex": []}
+
+    if log_bundle is not None:
+        # Bundle mode: one window per machine per source
+        claude_dirs, codex_dirs = _discover_bundle_sources(log_bundle)
+
+        for cdir in claude_dirs:
+            earliest = _earliest_claude_timestamp(cdir)
+            latest = _latest_claude_timestamp(cdir)
+            if earliest is not None and latest is not None:
+                start_date = datetime.fromtimestamp(earliest).strftime("%Y-%m-%d")
+                end_date = datetime.fromtimestamp(latest).strftime("%Y-%m-%d")
+                result["claude"].append((start_date, end_date))
+
+        for xdir in codex_dirs:
+            earliest = _earliest_codex_timestamp(xdir)
+            latest = _latest_codex_timestamp(xdir)
+            if earliest is not None and latest is not None:
+                start_date = datetime.fromtimestamp(earliest).strftime("%Y-%m-%d")
+                end_date = datetime.fromtimestamp(latest).strftime("%Y-%m-%d")
+                result["codex"].append((start_date, end_date))
+    else:
+        # Default mode: single directory per source
+        if claude_dir is None:
+            claude_dir = Path.home() / ".claude"
+        if codex_dir is None:
+            codex_dir = Path.home() / ".codex"
+
+        earliest = _earliest_claude_timestamp(claude_dir)
+        latest = _latest_claude_timestamp(claude_dir)
+        if earliest is not None and latest is not None:
+            start_date = datetime.fromtimestamp(earliest).strftime("%Y-%m-%d")
+            end_date = datetime.fromtimestamp(latest).strftime("%Y-%m-%d")
+            result["claude"].append((start_date, end_date))
+
+        earliest = _earliest_codex_timestamp(codex_dir)
+        latest = _latest_codex_timestamp(codex_dir)
+        if earliest is not None and latest is not None:
+            start_date = datetime.fromtimestamp(earliest).strftime("%Y-%m-%d")
+            end_date = datetime.fromtimestamp(latest).strftime("%Y-%m-%d")
+            result["codex"].append((start_date, end_date))
+
+    return result
 
 
 def detect_source_date_ranges(
@@ -495,6 +644,102 @@ def detect_source_date_ranges(
         result["codex"] = datetime.fromtimestamp(codex_ts).strftime("%Y-%m-%d")
 
     return result
+
+
+def merge_coverage_windows(
+    windows: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Merge overlapping or adjacent coverage windows.
+
+    Takes a list of (start_date, end_date) tuples and returns a sorted list
+    of non-overlapping windows, with overlapping or adjacent windows merged.
+
+    Args:
+        windows: List of (start_date, end_date) tuples as YYYY-MM-DD strings
+
+    Returns:
+        Sorted list of merged, non-overlapping windows
+    """
+    if not windows:
+        return []
+
+    # Sort by start date
+    sorted_windows = sorted(windows, key=lambda w: w[0])
+
+    merged: list[tuple[str, str]] = []
+    current_start, current_end = sorted_windows[0]
+
+    for start, end in sorted_windows[1:]:
+        # Parse dates to check adjacency
+        current_end_dt = datetime.strptime(current_end, "%Y-%m-%d")
+        start_dt = datetime.strptime(start, "%Y-%m-%d")
+
+        # Windows are adjacent if start is at most 1 day after current_end
+        # Or overlapping if start <= current_end
+        if start_dt <= current_end_dt + timedelta(days=1):
+            # Merge: extend current_end if needed
+            if end > current_end:
+                current_end = end
+        else:
+            # Gap - save current window, start new one
+            merged.append((current_start, current_end))
+            current_start, current_end = start, end
+
+    # Don't forget the last window
+    merged.append((current_start, current_end))
+
+    return merged
+
+
+def intersect_coverage_windows(
+    windows1: list[tuple[str, str]],
+    windows2: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Compute the intersection of two sets of coverage windows.
+
+    Returns periods where BOTH sets have coverage. This is used to find
+    time ranges where all log sources have data.
+
+    Args:
+        windows1: First list of (start_date, end_date) windows
+        windows2: Second list of (start_date, end_date) windows
+
+    Returns:
+        List of windows representing the intersection, sorted and merged
+    """
+    if not windows1 or not windows2:
+        return []
+
+    intersections: list[tuple[str, str]] = []
+
+    for start1, end1 in windows1:
+        for start2, end2 in windows2:
+            # Find overlap
+            overlap_start = max(start1, start2)
+            overlap_end = min(end1, end2)
+
+            # Valid intersection if start <= end
+            if overlap_start <= overlap_end:
+                intersections.append((overlap_start, overlap_end))
+
+    # Merge any overlapping intersections
+    return merge_coverage_windows(intersections)
+
+
+def is_date_covered(date: str, windows: list[tuple[str, str]]) -> bool:
+    """Check if a date falls within any of the coverage windows.
+
+    Args:
+        date: Date string in YYYY-MM-DD format
+        windows: List of (start_date, end_date) coverage windows
+
+    Returns:
+        True if date is within any window (inclusive), False otherwise
+    """
+    for start, end in windows:
+        if start <= date <= end:
+            return True
+    return False
 
 
 def effective_start_date(source_dates: dict[str, Optional[str]]) -> Optional[str]:

@@ -13,9 +13,11 @@ from typing import Optional, TypedDict
 
 from .ai_hours import (
     collect_interactions,
+    detect_coverage_windows,
     detect_sessions,
-    detect_source_date_ranges,
-    effective_start_date,
+    intersect_coverage_windows,
+    is_date_covered,
+    merge_coverage_windows,
 )
 from .beads_metrics import gather_beads_metrics, human_bytes, write_beads_csv
 from .compare import (
@@ -123,28 +125,46 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     if log_bundle is not None:
         # Bundle mode: discover sources from bundle structure
         interactions = collect_interactions(log_bundle=log_bundle)
-        source_dates = detect_source_date_ranges(log_bundle=log_bundle)
+        raw_coverage = detect_coverage_windows(log_bundle=log_bundle)
     else:
         # Default mode: use single directories
         claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
         codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
         interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
-        source_dates = detect_source_date_ranges(claude_dir=claude_dir, codex_dir=codex_dir)
+        raw_coverage = detect_coverage_windows(claude_dir=claude_dir, codex_dir=codex_dir)
 
     if not interactions:
         print("No interactions found in AI assistant logs.", file=sys.stderr)
         return 1
 
-    # Detect source date ranges
-    auto_since = effective_start_date(source_dates)
+    # Compute effective coverage windows
+    # 1. Merge windows within each source (UNION across machines)
+    claude_coverage = merge_coverage_windows(raw_coverage["claude"])
+    codex_coverage = merge_coverage_windows(raw_coverage["codex"])
+
+    # 2. Intersect Claude and Codex coverage to find periods with complete data
+    if claude_coverage and codex_coverage:
+        coverage_windows = intersect_coverage_windows(claude_coverage, codex_coverage)
+        if not coverage_windows:
+            print(
+                "Warning: No overlapping coverage between Claude and Codex logs. "
+                "Analyzing all sessions without coverage filtering.",
+                file=sys.stderr,
+            )
+    elif claude_coverage:
+        coverage_windows = claude_coverage
+    elif codex_coverage:
+        coverage_windows = codex_coverage
+    else:
+        coverage_windows = []
 
     if ns.verbose:
-        if source_dates["claude"]:
-            print(f"claude_logs_start: {source_dates['claude']}")
-        if source_dates["codex"]:
-            print(f"codex_logs_start: {source_dates['codex']}")
-        if auto_since:
-            print(f"effective_start_date: {auto_since}")
+        if claude_coverage:
+            print(f"claude_coverage: {claude_coverage}")
+        if codex_coverage:
+            print(f"codex_coverage: {codex_coverage}")
+        if coverage_windows:
+            print(f"effective_coverage: {coverage_windows}")
 
     # Detect repos from interactions
     repos = collect_repos_from_interactions(interactions, config)
@@ -194,7 +214,7 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     # Process each session
     session_metrics: list[SessionMetrics] = []
     skipped_no_repo = 0
-    skipped_before_start = 0
+    skipped_no_coverage = 0
 
     for session in sessions:
         # Find the repo root for this session's project
@@ -211,9 +231,9 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
 
         session_date = datetime.fromtimestamp(session.start_ts).strftime("%Y-%m-%d")
 
-        # Skip sessions before effective start date
-        if auto_since and session_date < auto_since:
-            skipped_before_start += 1
+        # Skip sessions outside coverage windows
+        if coverage_windows and not is_date_covered(session_date, coverage_windows):
+            skipped_no_coverage += 1
             continue
 
         configuration = classify_session(
@@ -241,9 +261,9 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             date=session_date,
         ))
 
-    if ns.verbose and (skipped_no_repo > 0 or skipped_before_start > 0):
+    if ns.verbose and (skipped_no_repo > 0 or skipped_no_coverage > 0):
         print(f"sessions_skipped_no_repo: {skipped_no_repo}")
-        print(f"sessions_skipped_before_start: {skipped_before_start}")
+        print(f"sessions_skipped_no_coverage: {skipped_no_coverage}")
 
     if not session_metrics:
         print("No sessions matched the criteria.", file=sys.stderr)
