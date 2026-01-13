@@ -154,6 +154,7 @@ def classify_session(
     session_start_date: str,
     beads_date: Optional[str],
     is_beadhub: bool,
+    global_beadhub_date: Optional[str] = None,
 ) -> str:
     """Classify a session into a configuration bucket.
 
@@ -161,11 +162,13 @@ def classify_session(
         session_start_date: Date of session start (YYYY-MM-DD).
         beads_date: Date beads was adopted (YYYY-MM-DD), or None.
         is_beadhub: Whether this is a beadhub repo (name starts with beadhub-).
+        global_beadhub_date: Date when beadhub was first created globally (YYYY-MM-DD),
+            or None if no beadhub repos exist.
 
     Returns:
         One of: "none", "beads", "beads+beadhub"
     """
-    return get_configuration(beads_date, is_beadhub, session_start_date)
+    return get_configuration(beads_date, is_beadhub, session_start_date, global_beadhub_date)
 
 
 def aggregate_by_configuration(

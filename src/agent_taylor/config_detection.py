@@ -64,6 +64,7 @@ def get_configuration(
     beads_date: Optional[str],
     is_beadhub: bool,
     check_date: str,
+    global_beadhub_date: Optional[str] = None,
 ) -> str:
     """Determine the configuration for a given date.
 
@@ -71,6 +72,8 @@ def get_configuration(
         beads_date: Date when beads was adopted (YYYY-MM-DD), or None.
         is_beadhub: Whether this is a beadhub repo (name starts with beadhub-).
         check_date: Date to check configuration for (YYYY-MM-DD).
+        global_beadhub_date: Date when beadhub was first created globally (YYYY-MM-DD),
+            or None if no beadhub repos exist.
 
     Returns:
         One of: "none", "beads", "beads+beadhub"
@@ -78,6 +81,10 @@ def get_configuration(
     # If beads not adopted, or check_date is before beads adoption
     if beads_date is None or check_date < beads_date:
         return "none"
+
+    # If global beadhub exists and check_date is on or after that date
+    if global_beadhub_date is not None and check_date >= global_beadhub_date:
+        return "beads+beadhub"
 
     # Beadhub repos are always "beads+beadhub" once beads is adopted
     if is_beadhub:

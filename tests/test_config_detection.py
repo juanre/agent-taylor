@@ -173,3 +173,58 @@ class TestGetConfiguration:
         )
 
         assert result == "none"
+
+    def test_returns_beads_beadhub_after_global_beadhub_date(self) -> None:
+        """get_configuration returns 'beads+beadhub' after global beadhub exists."""
+        from agent_taylor.config_detection import get_configuration
+
+        # Non-beadhub repo, but global beadhub exists → beads+beadhub
+        result = get_configuration(
+            beads_date="2025-06-01",
+            is_beadhub=False,
+            check_date="2025-07-15",
+            global_beadhub_date="2025-07-01",
+        )
+
+        assert result == "beads+beadhub"
+
+    def test_returns_beads_before_global_beadhub_date(self) -> None:
+        """get_configuration returns 'beads' before global beadhub exists."""
+        from agent_taylor.config_detection import get_configuration
+
+        # Non-beadhub repo, beads adopted, but before global beadhub → beads
+        result = get_configuration(
+            beads_date="2025-06-01",
+            is_beadhub=False,
+            check_date="2025-06-15",
+            global_beadhub_date="2025-07-01",
+        )
+
+        assert result == "beads"
+
+    def test_returns_beads_beadhub_on_global_beadhub_date(self) -> None:
+        """get_configuration returns 'beads+beadhub' on global beadhub adoption date."""
+        from agent_taylor.config_detection import get_configuration
+
+        result = get_configuration(
+            beads_date="2025-06-01",
+            is_beadhub=False,
+            check_date="2025-07-01",
+            global_beadhub_date="2025-07-01",
+        )
+
+        assert result == "beads+beadhub"
+
+    def test_returns_none_when_no_global_beadhub_and_no_beads(self) -> None:
+        """get_configuration returns 'none' without beads even with global beadhub."""
+        from agent_taylor.config_detection import get_configuration
+
+        # Global beadhub exists, but this repo has no beads → none
+        result = get_configuration(
+            beads_date=None,
+            is_beadhub=False,
+            check_date="2025-07-15",
+            global_beadhub_date="2025-07-01",
+        )
+
+        assert result == "none"
