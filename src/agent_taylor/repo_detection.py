@@ -20,6 +20,9 @@ class PathConfig:
     remap: dict[str, str] = field(default_factory=dict)
     ignore: set[str] = field(default_factory=set)
     ignore_projects: set[str] = field(default_factory=set)
+    project_remap: dict[str, str] = field(default_factory=dict)
+    # Maps "parent/project" to target repo name
+    parent_project_remap: dict[str, str] = field(default_factory=dict)
     log_bundle: Optional[Path] = None
 
 
@@ -54,6 +57,8 @@ def load_path_config(config_path: Optional[Path] = None) -> PathConfig:
     remap = data.get("remap", {})
     ignore_list = data.get("ignore", {}).get("paths", [])
     ignore_projects_list = data.get("ignore", {}).get("projects", [])
+    project_remap = data.get("project_remap", {})
+    parent_project_remap = data.get("parent_project_remap", {})
 
     log_bundle_raw = data.get("log_bundle")
     if log_bundle_raw is not None and not isinstance(log_bundle_raw, str):
@@ -64,6 +69,8 @@ def load_path_config(config_path: Optional[Path] = None) -> PathConfig:
         remap=dict(remap),
         ignore=set(ignore_list),
         ignore_projects=set(ignore_projects_list),
+        project_remap=dict(project_remap),
+        parent_project_remap=dict(parent_project_remap),
         log_bundle=log_bundle,
     )
 

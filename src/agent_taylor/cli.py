@@ -266,10 +266,18 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
         if session.project in config.ignore_projects:
             continue
 
+        # Apply project remapping (parent-specific takes priority)
+        parent_dir = Path(session.project_full).parent.name if session.project_full else ""
+        parent_key = f"{parent_dir}/{session.project}"
+        if parent_key in config.parent_project_remap:
+            project = config.parent_project_remap[parent_key]
+        else:
+            project = config.project_remap.get(session.project, session.project)
+
         # Find the repo root for this session's project
-        if session.project in repo_by_name:
-            repo_root = repo_by_name[session.project]
-        elif session.project.startswith("beadhub-") and "beadhub" in repo_by_name:
+        if project in repo_by_name:
+            repo_root = repo_by_name[project]
+        elif project.startswith("beadhub-") and "beadhub" in repo_by_name:
             # Worktrees of beadhub - map to main repo for time tracking
             # (commits are already in the main repo)
             repo_root = repo_by_name["beadhub"]

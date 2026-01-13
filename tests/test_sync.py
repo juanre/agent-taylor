@@ -70,8 +70,12 @@ class TestSyncCommand:
 
         monkeypatch.delenv("AGENT_TAYLOR_LOG_BUNDLE", raising=False)
 
+        # Use an empty config file to avoid picking up the real config
+        empty_config = tmp_path / "empty.toml"
+        empty_config.write_text("")
+
         ns = argparse.Namespace(
-            config=None,
+            config=str(empty_config),
             bundle=None,
             machine_name=None,
         )
