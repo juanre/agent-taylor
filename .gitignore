@@ -13,3 +13,4 @@ wheels/
 
 # Generated output
 out/
+logs/
