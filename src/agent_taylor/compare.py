@@ -276,3 +276,58 @@ def aggregate_by_date_and_configuration(
         return (item["date"], config_idx)
 
     return sorted(groups.values(), key=sort_key)
+
+
+class DateMetrics(TypedDict):
+    """Aggregated metrics for a single date (all configurations combined)."""
+
+    date: str
+    sessions: int
+    hours: float
+    commits: int
+    delta: int
+    delta_per_hour: float
+    commits_per_hour: float
+
+
+def aggregate_by_date(
+    session_metrics: list[SessionMetrics],
+) -> list[DateMetrics]:
+    """Aggregate session metrics by date (all configurations combined).
+
+    Args:
+        session_metrics: List of SessionMetrics dicts with date field.
+
+    Returns:
+        List of DateMetrics dicts sorted by date.
+    """
+    if not session_metrics:
+        return []
+
+    # Group by date only
+    groups: dict[str, DateMetrics] = {}
+
+    for session in session_metrics:
+        date = session["date"]
+        if date not in groups:
+            groups[date] = DateMetrics(
+                date=date,
+                sessions=0,
+                hours=0.0,
+                commits=0,
+                delta=0,
+                delta_per_hour=0.0,
+                commits_per_hour=0.0,
+            )
+        groups[date]["sessions"] += 1
+        groups[date]["hours"] += session["hours"]
+        groups[date]["commits"] += session["commits"]
+        groups[date]["delta"] += session["delta"]
+
+    # Compute rates
+    for group in groups.values():
+        if group["hours"] > 0:
+            group["delta_per_hour"] = group["delta"] / group["hours"]
+            group["commits_per_hour"] = group["commits"] / group["hours"]
+
+    return sorted(groups.values(), key=lambda x: x["date"])

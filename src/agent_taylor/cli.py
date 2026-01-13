@@ -23,6 +23,7 @@ from .beads_metrics import gather_beads_metrics, human_bytes, write_beads_csv
 from .compare import (
     SessionMetrics,
     aggregate_by_configuration,
+    aggregate_by_date,
     aggregate_by_date_and_configuration,
     classify_session,
     get_commits_in_window,
@@ -281,16 +282,28 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     print()
 
     if ns.history:
-        # Daily breakdown
-        daily = aggregate_by_date_and_configuration(session_metrics)
-        print(f"{'date':<12} {'configuration':<16} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
-        print("-" * 102)
-        for day in daily:
-            print(
-                f"{day['date']:<12} {day['configuration']:<16} {day['sessions']:>8} {day['hours']:>8.1f} "
-                f"{day['commits']:>8} {day['delta']:>10} "
-                f"{day['delta_per_hour']:>10.1f} {day['commits_per_hour']:>10.2f}"
-            )
+        if ns.combined:
+            # Daily breakdown, all configurations combined
+            daily = aggregate_by_date(session_metrics)
+            print(f"{'date':<12} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
+            print("-" * 84)
+            for day in daily:
+                print(
+                    f"{day['date']:<12} {day['sessions']:>8} {day['hours']:>8.1f} "
+                    f"{day['commits']:>8} {day['delta']:>10} "
+                    f"{day['delta_per_hour']:>10.1f} {day['commits_per_hour']:>10.2f}"
+                )
+        else:
+            # Daily breakdown by configuration
+            daily = aggregate_by_date_and_configuration(session_metrics)
+            print(f"{'date':<12} {'configuration':<16} {'sessions':>8} {'hours':>8} {'commits':>8} {'delta':>10} {'delta/hr':>10} {'commits/hr':>10}")
+            print("-" * 102)
+            for day in daily:
+                print(
+                    f"{day['date']:<12} {day['configuration']:<16} {day['sessions']:>8} {day['hours']:>8.1f} "
+                    f"{day['commits']:>8} {day['delta']:>10} "
+                    f"{day['delta_per_hour']:>10.1f} {day['commits_per_hour']:>10.2f}"
+                )
     else:
         # Aggregate by configuration
         aggregated = aggregate_by_configuration(session_metrics)
@@ -438,6 +451,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Only include beadhub sessions on or after this date (YYYY-MM-DD). "
              "Use to filter to mature beadhub period while keeping all other data.",
+    )
+    compare.add_argument(
+        "--combined",
+        action="store_true",
+        help="With --history, combine all configurations into single daily totals.",
     )
     compare.set_defaults(func=_cmd_compare)
 
