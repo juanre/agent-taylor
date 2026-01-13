@@ -198,18 +198,6 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
                 info.append("beadhub repo")
             print(f"  {repo_name}: {', '.join(info)}")
 
-    # Compute global beadhub date (earliest beads_date among beadhub repos)
-    global_beadhub_date: Optional[str] = None
-    beadhub_dates = [
-        cfg["beads_date"]
-        for cfg in repo_configs.values()
-        if cfg["is_beadhub"] and cfg["beads_date"] is not None
-    ]
-    if beadhub_dates:
-        global_beadhub_date = min(beadhub_dates)
-        if ns.verbose:
-            print(f"global_beadhub_date: {global_beadhub_date}")
-
     # Detect sessions from interactions
     sessions = detect_sessions(interactions)
 
@@ -248,11 +236,18 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
             skipped_no_coverage += 1
             continue
 
+        # Skip sessions before --since date
+        if ns.since and session_date < ns.since:
+            continue
+
+        # Skip beadhub sessions before --beadhub-since date
+        if ns.beadhub_since and repo_config["is_beadhub"] and session_date < ns.beadhub_since:
+            continue
+
         configuration = classify_session(
             session_start_date=session_date,
             beads_date=repo_config["beads_date"],
             is_beadhub=repo_config["is_beadhub"],
-            global_beadhub_date=global_beadhub_date,
         )
 
         # Get commits during this session
@@ -432,6 +427,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--history",
         action="store_true",
         help="Show daily breakdown over time.",
+    )
+    compare.add_argument(
+        "--since",
+        default=None,
+        help="Only include sessions on or after this date (YYYY-MM-DD).",
+    )
+    compare.add_argument(
+        "--beadhub-since",
+        default=None,
+        help="Only include beadhub sessions on or after this date (YYYY-MM-DD). "
+             "Use to filter to mature beadhub period while keeping all other data.",
     )
     compare.set_defaults(func=_cmd_compare)
 
