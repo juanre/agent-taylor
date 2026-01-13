@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime
 from importlib import metadata
@@ -48,6 +49,30 @@ def _version() -> str:
         return "0.0.0"
 
 
+def _resolve_log_bundle(cli_bundle: Optional[str]) -> Optional[Path]:
+    """Resolve log bundle path from CLI flag or environment variable.
+
+    Priority:
+    1. CLI --log-bundle flag (if provided)
+    2. AGENT_TAYLOR_LOG_BUNDLE environment variable
+    3. None (use default single-directory mode)
+
+    Args:
+        cli_bundle: Value from --log-bundle CLI flag, or None
+
+    Returns:
+        Resolved Path with ~ expanded, or None for default mode
+    """
+    if cli_bundle is not None:
+        return Path(cli_bundle).expanduser()
+
+    env_bundle = os.environ.get("AGENT_TAYLOR_LOG_BUNDLE", "").strip()
+    if env_bundle:
+        return Path(env_bundle).expanduser()
+
+    return None
+
+
 def _cmd_beads(ns: argparse.Namespace) -> int:
     repos = [Path(r) for r in ns.repos]
     metrics = [gather_beads_metrics(r) for r in repos]
@@ -75,17 +100,40 @@ def _cmd_compare(ns: argparse.Namespace) -> int:
     config_path = Path(ns.config).expanduser() if ns.config else None
     config = load_path_config(config_path)
 
+    # Resolve log bundle (CLI flag > env var > None)
+    log_bundle = _resolve_log_bundle(ns.log_bundle)
+
+    # Validate log bundle if provided
+    if log_bundle is not None:
+        if not log_bundle.exists():
+            print(f"Error: Log bundle directory does not exist: {log_bundle}", file=sys.stderr)
+            return 1
+        if not log_bundle.is_dir():
+            print(f"Error: Log bundle path is not a directory: {log_bundle}", file=sys.stderr)
+            return 1
+        if ns.claude_dir or ns.codex_dir:
+            print(
+                "Warning: --log-bundle specified, ignoring --claude-dir and --codex-dir",
+                file=sys.stderr,
+            )
+
     # Collect AI interactions
-    claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
-    codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
-    interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
+    if log_bundle is not None:
+        # Bundle mode: discover sources from bundle structure
+        interactions = collect_interactions(log_bundle=log_bundle)
+        source_dates = detect_source_date_ranges(log_bundle=log_bundle)
+    else:
+        # Default mode: use single directories
+        claude_dir = Path(ns.claude_dir).expanduser() if ns.claude_dir else None
+        codex_dir = Path(ns.codex_dir).expanduser() if ns.codex_dir else None
+        interactions = collect_interactions(claude_dir=claude_dir, codex_dir=codex_dir)
+        source_dates = detect_source_date_ranges(claude_dir=claude_dir, codex_dir=codex_dir)
 
     if not interactions:
         print("No interactions found in AI assistant logs.", file=sys.stderr)
         return 1
 
     # Detect source date ranges
-    source_dates = detect_source_date_ranges(claude_dir=claude_dir, codex_dir=codex_dir)
     auto_since = effective_start_date(source_dates)
 
     if ns.verbose:
@@ -268,6 +316,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--codex-dir",
         default=None,
         help="Path to Codex config dir (default: ~/.codex).",
+    )
+    compare.add_argument(
+        "--log-bundle",
+        default=None,
+        help="Directory containing machine subdirs with claude/ and codex/ logs. "
+             "Can also be set via AGENT_TAYLOR_LOG_BUNDLE env var.",
     )
     compare.add_argument(
         "--verbose",

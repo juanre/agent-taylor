@@ -248,6 +248,176 @@ class TestCompareArgParsing:
 
         assert ns.history is True
 
+    def test_accepts_log_bundle_flag(self) -> None:
+        """compare command accepts --log-bundle flag."""
+        from agent_taylor.cli import build_parser
+
+        parser = build_parser()
+        ns = parser.parse_args([
+            "compare", "--author", "Juan",
+            "--log-bundle", "~/Documents/agent-logs"
+        ])
+
+        assert ns.log_bundle == "~/Documents/agent-logs"
+
+    def test_log_bundle_defaults_to_none(self) -> None:
+        """--log-bundle defaults to None when not specified."""
+        from agent_taylor.cli import build_parser
+
+        parser = build_parser()
+        ns = parser.parse_args(["compare", "--author", "Juan"])
+
+        assert ns.log_bundle is None
+
+
+class TestLogBundleEnvVar:
+    """Tests for AGENT_TAYLOR_LOG_BUNDLE environment variable."""
+
+    def test_env_var_used_when_no_cli_flag(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variable is used when --log-bundle not specified."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        bundle_path = str(tmp_path / "agent-logs")
+        monkeypatch.setenv("AGENT_TAYLOR_LOG_BUNDLE", bundle_path)
+
+        result = _resolve_log_bundle(cli_bundle=None)
+
+        assert result == Path(bundle_path)
+
+    def test_cli_flag_overrides_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CLI --log-bundle flag takes priority over environment variable."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        env_path = str(tmp_path / "env-logs")
+        cli_path = str(tmp_path / "cli-logs")
+        monkeypatch.setenv("AGENT_TAYLOR_LOG_BUNDLE", env_path)
+
+        result = _resolve_log_bundle(cli_bundle=cli_path)
+
+        assert result == Path(cli_path).expanduser()
+
+    def test_returns_none_when_neither_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns None when neither CLI nor env var is set."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        monkeypatch.delenv("AGENT_TAYLOR_LOG_BUNDLE", raising=False)
+
+        result = _resolve_log_bundle(cli_bundle=None)
+
+        assert result is None
+
+    def test_expands_tilde_in_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Paths with ~ are expanded."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        monkeypatch.delenv("AGENT_TAYLOR_LOG_BUNDLE", raising=False)
+        result = _resolve_log_bundle(cli_bundle="~/Documents/agent-logs")
+
+        assert result == Path.home() / "Documents" / "agent-logs"
+
+    def test_env_var_tilde_is_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variable paths with ~ are expanded."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        monkeypatch.setenv("AGENT_TAYLOR_LOG_BUNDLE", "~/Documents/agent-logs")
+
+        result = _resolve_log_bundle(cli_bundle=None)
+
+        assert result == Path.home() / "Documents" / "agent-logs"
+
+    def test_empty_string_env_var_treated_as_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty string env var is treated as if unset."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        monkeypatch.setenv("AGENT_TAYLOR_LOG_BUNDLE", "")
+
+        result = _resolve_log_bundle(cli_bundle=None)
+
+        assert result is None
+
+    def test_whitespace_only_env_var_treated_as_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Whitespace-only env var is treated as if unset."""
+        from agent_taylor.cli import _resolve_log_bundle
+
+        monkeypatch.setenv("AGENT_TAYLOR_LOG_BUNDLE", "   ")
+
+        result = _resolve_log_bundle(cli_bundle=None)
+
+        assert result is None
+
+
+class TestLogBundleValidation:
+    """Tests for log bundle path validation in _cmd_compare."""
+
+    def test_rejects_nonexistent_bundle(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """_cmd_compare returns error for nonexistent bundle path."""
+        import argparse
+        from agent_taylor.cli import _cmd_compare
+
+        ns = argparse.Namespace(
+            config=None,
+            log_bundle=str(tmp_path / "nonexistent"),
+            claude_dir=None,
+            codex_dir=None,
+            author="Test",
+            verbose=False,
+            history=False,
+        )
+
+        result = _cmd_compare(ns)
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "does not exist" in captured.err
+
+    def test_rejects_file_as_bundle(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """_cmd_compare returns error when bundle path is a file."""
+        import argparse
+        from agent_taylor.cli import _cmd_compare
+
+        file_path = tmp_path / "not-a-dir.txt"
+        file_path.write_text("content")
+
+        ns = argparse.Namespace(
+            config=None,
+            log_bundle=str(file_path),
+            claude_dir=None,
+            codex_dir=None,
+            author="Test",
+            verbose=False,
+            history=False,
+        )
+
+        result = _cmd_compare(ns)
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "not a directory" in captured.err
+
+    def test_warns_when_conflicting_args(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """_cmd_compare warns when bundle and dir args both specified."""
+        import argparse
+        from agent_taylor.cli import _cmd_compare
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+
+        ns = argparse.Namespace(
+            config=None,
+            log_bundle=str(bundle),
+            claude_dir="~/.claude",
+            codex_dir=None,
+            author="Test",
+            verbose=False,
+            history=False,
+        )
+
+        _cmd_compare(ns)
+
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err
+        assert "ignoring" in captured.err
+
 
 class TestAggregateByDateAndConfiguration:
     """Tests for aggregate_by_date_and_configuration function."""
