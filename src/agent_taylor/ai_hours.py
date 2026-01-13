@@ -56,6 +56,37 @@ def _project_name(full_path: str) -> str:
     return Path(full_path).name
 
 
+def _discover_bundle_sources(bundle: Path) -> tuple[list[Path], list[Path]]:
+    """Discover claude and codex directories in a log bundle.
+
+    A log bundle contains machine subdirectories, each with optional
+    claude/ and codex/ subdirs.
+
+    Args:
+        bundle: Path to the log bundle root directory
+
+    Returns:
+        Tuple of (claude_dirs, codex_dirs) found in the bundle
+    """
+    claude_dirs: list[Path] = []
+    codex_dirs: list[Path] = []
+
+    if not bundle.exists():
+        return claude_dirs, codex_dirs
+
+    for machine_dir in bundle.iterdir():
+        if not machine_dir.is_dir():
+            continue
+        claude_subdir = machine_dir / "claude"
+        if claude_subdir.is_dir():
+            claude_dirs.append(claude_subdir)
+        codex_subdir = machine_dir / "codex"
+        if codex_subdir.is_dir():
+            codex_dirs.append(codex_subdir)
+
+    return claude_dirs, codex_dirs
+
+
 def _parse_claude_sessions(claude_dir: Path) -> list[Interaction]:
     """Parse Claude Code session files for interactions.
 
@@ -211,18 +242,39 @@ def _parse_codex_sessions(codex_dir: Path) -> list[Interaction]:
 
 
 def collect_interactions(
+    log_bundle: Optional[Path] = None,
     claude_dir: Optional[Path] = None,
     codex_dir: Optional[Path] = None,
 ) -> list[Interaction]:
-    """Collect all interactions from Claude and Codex logs."""
-    if claude_dir is None:
-        claude_dir = Path.home() / ".claude"
-    if codex_dir is None:
-        codex_dir = Path.home() / ".codex"
+    """Collect all interactions from Claude and Codex logs.
 
+    Args:
+        log_bundle: If provided, discover sources from bundle structure.
+            Bundle mode ignores claude_dir and codex_dir.
+        claude_dir: Single Claude directory (default mode only).
+        codex_dir: Single Codex directory (default mode only).
+
+    Returns:
+        List of interactions sorted by timestamp.
+    """
     interactions: list[Interaction] = []
-    interactions.extend(_parse_claude_sessions(claude_dir))
-    interactions.extend(_parse_codex_sessions(codex_dir))
+
+    if log_bundle is not None:
+        # Bundle mode: discover sources from bundle structure
+        claude_dirs, codex_dirs = _discover_bundle_sources(log_bundle)
+        for cdir in claude_dirs:
+            interactions.extend(_parse_claude_sessions(cdir))
+        for xdir in codex_dirs:
+            interactions.extend(_parse_codex_sessions(xdir))
+    else:
+        # Default mode: use single directories
+        if claude_dir is None:
+            claude_dir = Path.home() / ".claude"
+        if codex_dir is None:
+            codex_dir = Path.home() / ".codex"
+        interactions.extend(_parse_claude_sessions(claude_dir))
+        interactions.extend(_parse_codex_sessions(codex_dir))
+
     interactions.sort(key=lambda i: i.timestamp)
     return interactions
 
@@ -400,27 +452,45 @@ def _earliest_codex_timestamp(codex_dir: Path) -> Optional[float]:
 
 
 def detect_source_date_ranges(
+    log_bundle: Optional[Path] = None,
     claude_dir: Optional[Path] = None,
     codex_dir: Optional[Path] = None,
 ) -> dict[str, Optional[str]]:
     """Detect the earliest date from each AI assistant log source.
 
+    Args:
+        log_bundle: If provided, discover sources from bundle structure.
+            Bundle mode ignores claude_dir and codex_dir.
+        claude_dir: Single Claude directory (default mode only).
+        codex_dir: Single Codex directory (default mode only).
+
     Returns:
         Dict with 'claude' and 'codex' keys, each mapping to a date string
         (YYYY-MM-DD) or None if no data found for that source.
     """
-    if claude_dir is None:
-        claude_dir = Path.home() / ".claude"
-    if codex_dir is None:
-        codex_dir = Path.home() / ".codex"
-
     result: dict[str, Optional[str]] = {"claude": None, "codex": None}
 
-    claude_ts = _earliest_claude_timestamp(claude_dir)
+    if log_bundle is not None:
+        # Bundle mode: discover sources and find earliest across all
+        claude_dirs, codex_dirs = _discover_bundle_sources(log_bundle)
+
+        claude_timestamps = [_earliest_claude_timestamp(d) for d in claude_dirs]
+        claude_ts = min((t for t in claude_timestamps if t is not None), default=None)
+
+        codex_timestamps = [_earliest_codex_timestamp(d) for d in codex_dirs]
+        codex_ts = min((t for t in codex_timestamps if t is not None), default=None)
+    else:
+        # Default mode: use single directories
+        if claude_dir is None:
+            claude_dir = Path.home() / ".claude"
+        if codex_dir is None:
+            codex_dir = Path.home() / ".codex"
+
+        claude_ts = _earliest_claude_timestamp(claude_dir)
+        codex_ts = _earliest_codex_timestamp(codex_dir)
+
     if claude_ts is not None:
         result["claude"] = datetime.fromtimestamp(claude_ts).strftime("%Y-%m-%d")
-
-    codex_ts = _earliest_codex_timestamp(codex_dir)
     if codex_ts is not None:
         result["codex"] = datetime.fromtimestamp(codex_ts).strftime("%Y-%m-%d")
 
