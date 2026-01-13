@@ -46,7 +46,7 @@ class Session:
 
 # Constants
 SESSION_GAP_SECONDS = 5 * 60  # 5 minutes
-THINKING_PREFIX_SECONDS = 3 * 60  # 3 minutes thinking before first query
+THINKING_PREFIX_SECONDS = 0  # No extra time prepended to sessions
 
 
 def _project_name(full_path: str) -> str:
