@@ -13,6 +13,14 @@ The tool analyzes your actual work sessions (from Claude Code and Codex logs) an
 uv sync
 ```
 
+### Local-only data
+
+This repo is intended to be shareable. Keep machine-local logs/config and generated outputs out of git:
+
+- Conversation logs and auth/config live under `~/.claude` and `~/.codex` (or a log bundle via `AGENT_TAYLOR_LOG_BUNDLE`).
+- Generated project classification CSVs are ignored (see `projects.example.csv` for the format).
+- Local tool config in `.claude/` is ignored.
+
 ### Compare productivity across configurations
 
 ```bash

@@ -14,3 +14,10 @@ wheels/
 # Generated output
 out/
 logs/
+
+# Local tool config (machine-specific)
+.claude/
+
+# Generated analysis outputs
+projects*.csv
+!projects.example.csv
